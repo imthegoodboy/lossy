@@ -1,0 +1,12 @@
+[package]
+name = "lossy-context-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+lossy-capture-core = { path = "../capture-core" }
+
+[lints]
+workspace = true
+
