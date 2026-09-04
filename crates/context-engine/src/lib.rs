@@ -3,7 +3,7 @@
 //! This crate does not capture text or persist content. It decides which draft a normalized
 //! event belongs to and rejects events that arrive after focus has moved elsewhere.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt};
 
 use lossy_capture_core::{ContextKey, EventSequence, FocusEpoch};
 
@@ -33,7 +33,7 @@ impl DraftStatus {
 }
 
 /// Current recovery snapshot for one context generation.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct DraftSnapshot {
     id: DraftId,
     context: ContextKey,
@@ -41,6 +41,21 @@ pub struct DraftSnapshot {
     status: DraftStatus,
     recoverable_content: String,
     editor_is_empty: bool,
+}
+
+impl fmt::Debug for DraftSnapshot {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("DraftSnapshot")
+            .field("id", &self.id)
+            .field("context", &self.context)
+            .field("generation", &self.generation)
+            .field("status", &self.status)
+            .field("recoverable_content", &"[redacted]")
+            .field("content_bytes", &self.recoverable_content.len())
+            .field("editor_is_empty", &self.editor_is_empty)
+            .finish()
+    }
 }
 
 impl DraftSnapshot {
@@ -71,7 +86,7 @@ impl DraftSnapshot {
 }
 
 /// A normalized event received from the capture pipeline.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub enum SessionEvent {
     Focused {
         sequence: EventSequence,
@@ -92,6 +107,50 @@ pub enum SessionEvent {
     CapturePaused {
         sequence: EventSequence,
     },
+}
+
+impl fmt::Debug for SessionEvent {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Focused {
+                sequence,
+                context,
+                focus_epoch,
+            } => formatter
+                .debug_struct("Focused")
+                .field("sequence", sequence)
+                .field("context", context)
+                .field("focus_epoch", focus_epoch)
+                .finish(),
+            Self::TextObserved {
+                sequence,
+                context,
+                focus_epoch,
+                content,
+            } => formatter
+                .debug_struct("TextObserved")
+                .field("sequence", sequence)
+                .field("context", context)
+                .field("focus_epoch", focus_epoch)
+                .field("content", &"[redacted]")
+                .field("content_bytes", &content.len())
+                .finish(),
+            Self::Submitted {
+                sequence,
+                context,
+                focus_epoch,
+            } => formatter
+                .debug_struct("Submitted")
+                .field("sequence", sequence)
+                .field("context", context)
+                .field("focus_epoch", focus_epoch)
+                .finish(),
+            Self::CapturePaused { sequence } => formatter
+                .debug_struct("CapturePaused")
+                .field("sequence", sequence)
+                .finish(),
+        }
+    }
 }
 
 impl SessionEvent {
@@ -479,5 +538,21 @@ mod tests {
             engine.drafts_for(user_a)[0].status(),
             DraftStatus::Suspended
         );
+    }
+
+    #[test]
+    fn debug_output_never_contains_draft_content() {
+        let user_a = context("user-a");
+        let event = text(1, user_a, 1, "private synthetic draft");
+        let event_debug = format!("{event:?}");
+        assert!(!event_debug.contains("private synthetic draft"));
+        assert!(event_debug.contains("[redacted]"));
+
+        let mut engine = ContextEngine::new();
+        engine.handle(focus(1, user_a, 1));
+        let actions = engine.handle(text(2, user_a, 1, "another private draft"));
+        let action_debug = format!("{:?}", actions[0]);
+        assert!(!action_debug.contains("another private draft"));
+        assert!(action_debug.contains("[redacted]"));
     }
 }
