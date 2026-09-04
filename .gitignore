@@ -1,0 +1,44 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Node and frontend builds
+node_modules/
+dist/
+.vite/
+coverage/
+*.tsbuildinfo
+
+# Tauri bundles and generated files
+src-tauri/target/
+*.msi
+*.msix
+*.appx
+*.exe
+
+# Local Lossy data and secrets
+.env
+.env.*
+!.env.example
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+data/
+blobs/
+backups/
+logs/
+
+# IDE and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
