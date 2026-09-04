@@ -21,7 +21,18 @@ Read the complete [product and technical architecture](./plan.md).
 
 The first release targets Windows 10/11 x64.
 
+## Development
+
+The initial workspace contains the privacy-safe capture types and draft context state machine.
+
+```powershell
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace --locked
+```
+
+Implementation changes are developed on focused branches and merged through pull requests.
+
 ## Security
 
 Lossy handles sensitive text. Do not include captured content, window titles, URLs, file paths, or clipboard data in logs, test fixtures, screenshots, or bug reports.
-
