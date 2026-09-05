@@ -1,7 +1,8 @@
-use interprocess::{
-    local_socket::{GenericNamespaced, ListenerOptions, Stream, prelude::*},
-    os::windows::{local_socket::ListenerOptionsExt, security_descriptor::SecurityDescriptor},
+use interprocess::os::windows::{
+    named_pipe::{PipeListener, PipeListenerOptions, PipeStream, pipe_mode::Bytes},
+    security_descriptor::SecurityDescriptor,
 };
+type Stream = PipeStream<Bytes, Bytes>;
 use serde_json::Value;
 use std::{
     io::{Read, Write},
@@ -11,28 +12,28 @@ use std::{
 pub fn name() -> Result<String, String> {
     Ok(format!("lossy-{}", crate::platform::sid()?))
 }
-pub fn listener() -> Result<interprocess::local_socket::Listener, String> {
+pub fn listener() -> Result<PipeListener<Bytes, Bytes>, String> {
     let name = name()?;
     let sddl =
         widestring::U16CString::from_str(format!("D:P(A;;GA;;;{})", crate::platform::sid()?))
             .map_err(|_| "IPC identity unavailable")?;
     let sd = SecurityDescriptor::deserialize(&sddl).map_err(|_| "IPC permissions unavailable")?;
-    ListenerOptions::new()
-        .name(
-            name.to_ns_name::<GenericNamespaced>()
-                .map_err(|_| "IPC name unavailable")?,
-        )
-        .security_descriptor(sd)
-        .create_sync()
+    let mut options = PipeListenerOptions::new().path(format!(r"\\.\pipe\{name}"));
+    options.security_descriptor = Some(sd);
+    options.input_buffer_size_hint = 65536;
+    options.output_buffer_size_hint = 65536;
+    options
+        .create_duplex::<Bytes>()
         .map_err(|_| "Lossy is already running or its pipe is unavailable".into())
 }
 pub fn request(value: &Value) -> Result<Value, String> {
+    // Renderer cards can request full text concurrently. Bound each client process to one
+    // outstanding pipe exchange so it cannot occupy all waiting pipe instances at once.
+    static CLIENT: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = CLIENT.lock().map_err(|_| "Local client unavailable")?;
     let name = name()?;
-    let mut stream = Stream::connect(
-        name.to_ns_name::<GenericNamespaced>()
-            .map_err(|_| "IPC name unavailable")?,
-    )
-    .map_err(|_| "Background process is not responding. Reopen Lossy to restart it.")?;
+    let mut stream = Stream::connect_by_path(format!(r"\\.\pipe\{name}"))
+        .map_err(|_| "Background process is not responding. Reopen Lossy to restart it.")?;
     stream
         .set_nonblocking(true)
         .map_err(|_| "IPC unavailable")?;
@@ -50,7 +51,9 @@ fn transfer(stream: &mut Stream, bytes: &mut [u8], write: bool) -> Result<(), St
     let mut done = 0;
     while done < bytes.len() {
         let result = if write {
-            stream.write(&bytes[done..])
+            // PIPE_NOWAIT writes larger than the available pipe buffer can repeatedly
+            // succeed with zero bytes. Small chunks let large archive/image frames progress.
+            stream.write(&bytes[done..bytes.len().min(done + 1024)])
         } else {
             stream.read(&mut bytes[done..])
         };
@@ -102,18 +105,23 @@ mod tests {
     #[test]
     fn connected_peer_can_delay_and_fragment_its_first_frame() {
         let name = format!("lossy-synthetic-ipc-{}", std::process::id());
-        let listener = ListenerOptions::new()
-            .name(name.clone().to_ns_name::<GenericNamespaced>().unwrap())
-            .create_sync()
-            .unwrap();
+        let path = format!(r"\\.\pipe\{name}");
+        let mut options = PipeListenerOptions::new().path(path.clone());
+        options.input_buffer_size_hint = 65536;
+        options.output_buffer_size_hint = 65536;
+        let listener = options.create_duplex::<Bytes>().unwrap();
         let server = std::thread::spawn(move || {
             let mut stream = listener.accept().unwrap();
             stream.set_nonblocking(true).unwrap();
             let value = receive(&mut stream).unwrap();
             assert_eq!(value["test"], "synthetic");
-            send(&mut stream, &value).unwrap();
+            send(
+                &mut stream,
+                &serde_json::json!({"test":"synthetic", "large":"x".repeat(262144)}),
+            )
+            .unwrap();
         });
-        let mut client = Stream::connect(name.to_ns_name::<GenericNamespaced>().unwrap()).unwrap();
+        let mut client = Stream::connect_by_path(path).unwrap();
         client.set_nonblocking(true).unwrap();
         std::thread::sleep(Duration::from_millis(30));
         let bytes = br#"{"test":"synthetic"}"#;
@@ -122,7 +130,9 @@ mod tests {
             .unwrap();
         std::thread::sleep(Duration::from_millis(30));
         client.write_all(bytes).unwrap();
-        assert_eq!(receive(&mut client).unwrap()["test"], "synthetic");
+        let response = receive(&mut client).unwrap();
+        assert_eq!(response["test"], "synthetic");
+        assert_eq!(response["large"].as_str().unwrap().len(), 262144);
         server.join().unwrap();
     }
 }

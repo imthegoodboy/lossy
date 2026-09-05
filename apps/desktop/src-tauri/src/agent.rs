@@ -1,5 +1,4 @@
 use base64::{Engine, engine::general_purpose::STANDARD};
-use interprocess::local_socket::prelude::*;
 use lossy_storage::{DraftContent, ItemId, SavedDraft, Store};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -233,6 +232,16 @@ impl Service {
         }
         Ok(())
     }
+    fn render(&self, draft: SavedDraft, preview: bool) -> Result<Value, String> {
+        let color = self
+            .store
+            .preference(&format!("color/{}", id_text(draft.id)))
+            .map_err(|e| e.to_string())?
+            .unwrap_or_else(|| "paper".into());
+        let mut item = view(draft, preview);
+        item["color"] = json!(color);
+        Ok(item)
+    }
     pub fn request(&mut self, request: Value) -> Result<Value, String> {
         let op = request["op"].as_str().ok_or("Missing operation")?;
         let id = || parse_id(request["id"].as_str().unwrap_or_default());
@@ -278,7 +287,7 @@ impl Service {
                         if matched <= offset {
                             continue;
                         }
-                        results.push(view(d, true));
+                        results.push(self.render(d, true)?);
                         if results.len() >= 61 {
                             break;
                         }
@@ -291,11 +300,8 @@ impl Service {
                     json!({"items":results.iter().take(60).collect::<Vec<_>>(),"more":results.len()>60}),
                 )
             }
-            "get" => Ok(view(
-                self.store.latest(id()?).map_err(|e| e.to_string())?,
-                false,
-            )),
-            "revision" => Ok(view(
+            "get" => self.render(self.store.latest(id()?).map_err(|e| e.to_string())?, false),
+            "revision" => self.render(
                 self.store
                     .revision(
                         id()?,
@@ -303,7 +309,18 @@ impl Service {
                     )
                     .map_err(|e| e.to_string())?,
                 false,
-            )),
+            ),
+            "color" => {
+                let item = self.store.latest(id()?).map_err(|e| e.to_string())?;
+                let color = request["color"].as_str().ok_or("Choose a box color")?;
+                if !["paper", "rose", "peach", "lavender", "sage", "blue"].contains(&color) {
+                    return Err("Unknown box color".into());
+                }
+                self.store
+                    .set_preference(&format!("color/{}", id_text(item.id)), color)
+                    .map_err(|e| e.to_string())?;
+                self.render(item, false)
+            }
             "save" => {
                 let heading = request["heading"]
                     .as_str()
@@ -333,7 +350,7 @@ impl Service {
                 }
                 .map_err(|e| e.to_string())?;
                 self.last_saved = now();
-                Ok(view(d, false))
+                self.render(d, false)
             }
             "pin" => {
                 self.store
@@ -357,7 +374,12 @@ impl Service {
                 Ok(json!(true))
             }
             "copy" => {
-                let d = self.store.latest(id()?).map_err(|e| e.to_string())?;
+                let d = if let Some(revision) = request["revision"].as_i64() {
+                    self.store.revision(id()?, revision)
+                } else {
+                    self.store.latest(id()?)
+                }
+                .map_err(|e| e.to_string())?;
                 let mut cb = arboard::Clipboard::new().map_err(|_| "Clipboard unavailable")?;
                 if d.kind == "image" {
                     let bytes = STANDARD

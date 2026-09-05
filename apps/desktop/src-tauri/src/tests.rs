@@ -126,3 +126,22 @@ fn command_validation_recovery_copies_filters_and_backup() {
     let backup = lossy_storage::Store::open(path).unwrap();
     assert_eq!(backup.list(10, 0).unwrap().len(), 2);
 }
+
+#[test]
+fn box_color_survives_restart_and_rejects_unknown_styles() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = service(dir.path());
+    capture(&mut s, "color-test", "Synthetic colored box", true);
+    let item = items(&mut s)[0].clone();
+    let changed = s
+        .request(json!({"op":"color","id":item["id"],"color":"sage"}))
+        .unwrap();
+    assert_eq!(changed["color"], "sage");
+    assert!(
+        s.request(json!({"op":"color","id":item["id"],"color":"url(unsafe)"}))
+            .is_err()
+    );
+    drop(s);
+    let mut reopened = service(dir.path());
+    assert_eq!(items(&mut reopened)[0]["color"], "sage");
+}

@@ -109,6 +109,10 @@
           item.pinned = r.pinned;
           persist();
           return true;
+        case "color":
+          item.color = r.color;
+          persist();
+          return {...item};
         case "settings":
           prefs = r.prefs;
           return true;

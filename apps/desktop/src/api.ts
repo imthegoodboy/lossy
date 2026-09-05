@@ -8,6 +8,7 @@ export type Item = {
   updated: number;
   kind: string;
   pinned: boolean;
+  color?: string;
 };
 export type Preferences = {
   enabled: boolean;
