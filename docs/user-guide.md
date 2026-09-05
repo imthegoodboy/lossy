@@ -1,5 +1,10 @@
 # Use Lossy
 
+> **Release hold:** Defender detected the installed v0.1.0 app as
+> `Trojan:Win32/Bearfoos.A!ml`. The cause is under investigation; a false positive is
+> not yet confirmed. Do not bypass protection or reinstall the detected version.
+> The installation instructions below apply after the hold is cleared.
+
 Install the x64 installer from [Releases](https://github.com/imthegoodboy/lossy/releases). The
 initial build is unsigned; Windows may warn about an unknown publisher. Only install trusted builds.
 Accept the single inline capture permission and test a synthetic Notepad draft.
@@ -11,7 +16,7 @@ leaves saving running. **Quit Lossy** in the tray stops saving until the next ap
 | Source | Behavior |
 | --- | --- |
 | Archive page | Four-column clickable cards, full-content popup, automatically loaded older items |
-| Native UI Automation Edit fields | Explicit app allowlist, process/window/editor identity |
+| Native UI Automation Edit fields | Selected apps or optional broader desktop capture; full executable-path checks also support separate renderer processes |
 | Standard web text boxes | Opt-in [Chrome/Edge companion](browser-companion.md) |
 | WhatsApp Web | Best-effort isolation; uncertain chat switches make separate cards |
 | Native clipboard | Allowed apps only; text and PNG bitmap images |
@@ -21,6 +26,32 @@ leaves saving running. **Quit Lossy** in the tray stops saving until the next ap
 Cursor/VS Code capture depends on standard editable accessibility fields. Incompatible native
 text starts another card. No adapter can infer IDs that the source does not expose. Native
 polling is about 35 ms; clipboard polling 100 ms. Neither guarantees every physical key before a power cut.
+
+## Capture setup and installation checks
+
+Finish the installer (the destination-folder screen is not the completed installation).
+Keep **Create desktop shortcut** selected on the finish page. Lossy should appear on your
+desktop, in the Start menu, and under Windows **Settings → Apps → Installed apps**.
+Rerunning the installer repairs installation files; it does not reset your encrypted archive.
+
+Expand **Capture setup** on the archive page to enable saving, pause it, control quiet sign-in
+startup, enable clipboard images/text, or select desktop executable names. Existing users'
+lists are preserved: add `orca.exe`, `claude.exe`, or another app explicitly if it is absent.
+The optional **all supported desktop apps** setting includes future apps, not just known ones.
+It still excludes known browsers, terminal hosts, WhatsApp Desktop and password managers.
+Unknown applications cannot always be classified; use the selected-app list for tighter privacy.
+
+The panel shows the latest desktop field check (including its time), not a guarantee of ongoing
+capture in every window. A supported-field result means text can be read; the last-save time
+changes only when content is committed. While viewing Lossy, the previous external field's
+result stays visible. Read the card itself to confirm an important draft was recovered.
+Browser companion setup and per-site permission are separate from desktop-app permissions.
+Browser clipboard copies remain excluded. Terminal buffers are never scraped as a fallback.
+
+If Lossy is missing, finish or rerun setup and inspect Windows Security Protection history if
+the executable disappears again. Do not disable security software or delete the data folder.
+For maintainers: `scripts/verify-install.ps1` checks the executable/version, companion resources,
+uninstaller, Installed Apps registration and both shortcuts. CI installs and checks the built installer.
 
 ## Archive
 
@@ -41,6 +72,10 @@ Images preserve PNG pixels, not filenames or animations.
 Limits: native drafts 1 MiB; browser text 200,000 UTF-16 characters; images 16 million pixels
 and 6 MiB after base64 PNG encoding. Native clipboard defaults include Paint and Snipping Tool.
 Browser clipboard images and file-drop lists are not captured. Lossy's own copies are skipped.
+Copies with an unknown owner (including some OLE-flushed copies), or an owner that does not
+match the allowed foreground app, are skipped as well. Capture setup reports the last clipboard
+check separately. This prioritizes avoiding misattributed sensitive copies over universal coverage.
+Image reading currently accepts PNG and DIBV5 clipboard formats; CF_BITMAP-only copies are not supported.
 
 ## Privacy, retention and recovery
 

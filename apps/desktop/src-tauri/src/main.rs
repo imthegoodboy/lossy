@@ -49,20 +49,7 @@ fn open_data_folder() -> Result<(), String> {
 
 #[tauri::command]
 fn setup_browser(app: tauri::AppHandle) -> Result<String, String> {
-    let dir = agent::directory();
-    std::fs::create_dir_all(&dir).map_err(|_| "Data folder unavailable")?;
-    let manifest = dir.join("browser-host.json");
-    let host = json!({"name":"app.lossy.companion","description":"Lossy local draft recovery","path":std::env::current_exe().map_err(|_| "Executable unavailable")?,"type":"stdio","allowed_origins":["chrome-extension://bbebeppoampdkokfpfiihnldhhjegoej/"]});
-    std::fs::write(&manifest, serde_json::to_vec_pretty(&host).unwrap())
-        .map_err(|_| "Could not write companion registration")?;
-    for browser in ["Google\\Chrome", "Microsoft\\Edge"] {
-        let path = format!("Software\\{browser}\\NativeMessagingHosts\\app.lossy.companion");
-        let (key, _) = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
-            .create_subkey(path)
-            .map_err(|_| "Could not register browser companion")?;
-        key.set_value("", &manifest.to_string_lossy().as_ref())
-            .map_err(|_| "Could not register browser companion")?;
-    }
+    register_browser_host()?;
     let bundled = app
         .path()
         .resource_dir()
@@ -80,8 +67,45 @@ fn setup_browser(app: tauri::AppHandle) -> Result<String, String> {
     Ok("Companion registered. In Chrome or Edge, open Extensions, enable Developer mode, choose Load unpacked, and select the browser folder that just opened. Then enable Lossy on each website using its toolbar button.".into())
 }
 
+fn register_browser_host() -> Result<(), String> {
+    let dir = agent::directory();
+    std::fs::create_dir_all(&dir).map_err(|_| "Data folder unavailable")?;
+    let manifest = dir.join("browser-host.json");
+    let host = json!({"name":"app.lossy.companion","description":"Lossy local draft recovery","path":std::env::current_exe().map_err(|_| "Executable unavailable")?,"type":"stdio","allowed_origins":["chrome-extension://bbebeppoampdkokfpfiihnldhhjegoej/"]});
+    std::fs::write(&manifest, serde_json::to_vec_pretty(&host).unwrap())
+        .map_err(|_| "Could not write companion registration")?;
+    for browser in ["Google\\Chrome", "Microsoft\\Edge"] {
+        let path = format!("Software\\{browser}\\NativeMessagingHosts\\app.lossy.companion");
+        let (key, _) = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
+            .create_subkey(path)
+            .map_err(|_| "Could not register browser companion")?;
+        key.set_value("", &manifest.to_string_lossy().as_ref())
+            .map_err(|_| "Could not register browser companion")?;
+    }
+    Ok(())
+}
+
 fn main() {
     let args = std::env::args().collect::<Vec<_>>();
+    if args.iter().any(|v| v == "--repair-install") {
+        // The installer has stopped the old agent. Preserve the archive and consent;
+        // repair only integrations the user previously enabled, without a window.
+        let result = (|| -> Result<(), String> {
+            let dir = agent::directory();
+            if !dir.join("lossy.db").exists() {
+                return Ok(());
+            }
+            let service = agent::Service::open(dir.clone(), Default::default())?;
+            if service.prefs.autostart {
+                platform::startup(true)?;
+            }
+            if dir.join("browser-host.json").exists() {
+                register_browser_host()?;
+            }
+            Ok(())
+        })();
+        std::process::exit(if result.is_ok() { 0 } else { 1 });
+    }
     if args
         .iter()
         .any(|v| v == "--native-host" || v.starts_with("chrome-extension://"))

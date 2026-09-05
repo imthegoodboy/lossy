@@ -16,7 +16,14 @@ import {
   TextAlignLeft,
   X,
 } from "@phosphor-icons/react";
-import { api, type Item, type Status } from "./api";
+import {
+  api,
+  setupBrowser,
+  type Item,
+  type Status,
+  type Preferences,
+} from "./api";
+import { CaptureSetup } from "./CaptureSetup";
 import "./style.css";
 
 function shortTime(value: number) {
@@ -512,12 +519,20 @@ function App() {
   const matrix = useRef<HTMLElement>(null);
   const sentinel = useRef<HTMLDivElement>(null);
   const busy = useRef(false);
+  const updatingPreferences = useRef(false);
   const refresh = useCallback(async () => {
-    if (busy.current || dragId.current || arranging.current) return;
+    if (
+      busy.current ||
+      dragId.current ||
+      arranging.current ||
+      updatingPreferences.current
+    )
+      return;
     busy.current = true;
     const version = interactionVersion.current;
     try {
       const state = await api<Status>({ op: "status" });
+      if (version !== interactionVersion.current) return;
       setStatus(state);
       // Avoid moving or replacing content underneath an active text selection.
       if (!window.getSelection()?.toString()) {
@@ -606,24 +621,32 @@ function App() {
     const target = items[items.findIndex((item) => item.id === id) + offset];
     if (target) void moveCard(id, target.id);
   }
-  async function enable() {
+  async function updatePreferences(changes: Partial<Preferences>) {
     if (!status || starting) return;
+    updatingPreferences.current = true;
+    interactionVersion.current++;
     setStarting(true);
     try {
       const prefs = {
         ...status.prefs,
-        enabled: true,
-        paused: false,
-        autostart: true,
+        ...changes,
       };
       await api({ op: "settings", prefs });
       setStatus({ ...status, prefs });
-      await refresh();
     } catch (e) {
       setError(String(e));
+      throw e;
     } finally {
       setStarting(false);
+      updatingPreferences.current = false;
     }
+  }
+  function enable() {
+    void updatePreferences({
+      enabled: true,
+      paused: false,
+      autostart: true,
+    }).catch(() => {});
   }
   return (
     <main
@@ -650,10 +673,19 @@ function App() {
             onChange={enable}
           />
           <span>
-            Save supported text and clipboard items locally, and start quietly
-            with Windows.
+            Enable local saving for the selected apps and start quietly with
+            Windows. Nothing is captured until you enable this. Choose your apps
+            in Capture setup below.
           </span>
         </label>
+      )}
+      {status && !status.error && (
+        <CaptureSetup
+          status={status}
+          busy={starting}
+          update={updatePreferences}
+          setupBrowser={setupBrowser}
+        />
       )}
       {(error || status?.error) && (
         <p className="error" role="alert">
@@ -661,7 +693,9 @@ function App() {
         </p>
       )}
       {status?.prefs.paused && (
-        <p className="notice">Saving is paused. Resume from the system tray.</p>
+        <p className="notice">
+          Saving is paused. Resume in Capture setup or from the system tray.
+        </p>
       )}
       {!ready && !error && (
         <section

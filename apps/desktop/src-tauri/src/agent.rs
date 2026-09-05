@@ -22,6 +22,7 @@ pub struct Preferences {
     pub retention_days: u32,
     pub allowed_apps: Vec<String>,
     pub browser_capture: bool,
+    pub all_desktop_apps: bool,
 }
 impl Default for Preferences {
     fn default() -> Self {
@@ -38,8 +39,11 @@ impl Default for Preferences {
                 "explorer.exe".into(),
                 "cursor.exe".into(),
                 "code.exe".into(),
+                "orca.exe".into(),
+                "claude.exe".into(),
             ],
             browser_capture: true,
+            all_desktop_apps: false,
         }
     }
 }
@@ -51,6 +55,7 @@ pub enum Message {
         text: String,
         source: String,
         trusted: bool,
+        committed: SyncSender<bool>,
     },
     Clipboard {
         text: String,
@@ -119,6 +124,8 @@ pub struct Service {
     ignored_clipboard: u32,
     salt: [u8; 32],
     writes: u32,
+    pub capture_health: Arc<RwLock<crate::capture::CaptureHealth>>,
+    pub clipboard_health: Arc<RwLock<crate::capture::CaptureHealth>>,
 }
 impl Service {
     pub fn open(dir: PathBuf, settings: Arc<RwLock<Preferences>>) -> Result<Self, String> {
@@ -157,6 +164,8 @@ impl Service {
             ignored_clipboard: 0,
             salt,
             writes: 0,
+            capture_health: Arc::new(RwLock::new(crate::capture::CaptureHealth::default())),
+            clipboard_health: Arc::new(RwLock::new(crate::capture::CaptureHealth::default())),
         })
     }
     fn context(&self, key: &str) -> [u8; 32] {
@@ -247,7 +256,7 @@ impl Service {
         let id = || parse_id(request["id"].as_str().unwrap_or_default());
         match op {
             "status" => Ok(
-                json!({"prefs":self.prefs,"last_saved":self.last_saved,"error":self.last_error,"data_dir":self.dir,"capture":"Native capture: allowed apps only. Browsers use the companion. Uncertain native edits may become separate cards."}),
+                json!({"prefs":self.prefs,"last_saved":self.last_saved,"error":self.last_error,"data_dir":self.dir,"native":*self.capture_health.read().unwrap(),"clipboard_status":*self.clipboard_health.read().unwrap(),"capture":"Only supported editable fields can be recovered. Browsers need the companion; terminal prompts and protected fields are excluded."}),
             ),
             "list" => {
                 let mut results = Vec::new();
@@ -451,6 +460,12 @@ impl Service {
                 if prefs.retention_days < 1
                     || prefs.retention_days > 3650
                     || prefs.allowed_apps.len() > 100
+                    || prefs.allowed_apps.iter().any(|app| {
+                        app.len() > 260
+                            || !app.to_ascii_lowercase().ends_with(".exe")
+                            || app.contains(['\\', '/', ':', '*', '?', '"', '<', '>', '|'])
+                            || app.trim() != app
+                    })
                 {
                     return Err("Check the retention and application settings".into());
                 }
@@ -539,8 +554,10 @@ pub fn launch() -> Result<SyncSender<Message>, String> {
             }
         }
     });
-    crate::capture::start(tx.clone(), settings.clone());
-    clipboard_watch(tx.clone(), settings);
+    if let Ok(s) = &service {
+        crate::capture::start(tx.clone(), settings.clone(), s.capture_health.clone());
+        clipboard_watch(tx.clone(), settings.clone(), s.clipboard_health.clone());
+    }
     std::thread::spawn(move || {
         let mut maintenance = Instant::now();
         loop {
@@ -564,12 +581,20 @@ pub fn launch() -> Result<SyncSender<Message>, String> {
                     text,
                     source,
                     trusted,
+                    committed,
                 }) => {
-                    if let Ok(s) = &mut service
-                        && let Err(e) = s.capture(context, text, source, trusted)
-                    {
-                        s.last_error = Some(e);
-                    }
+                    let saved = if let Ok(s) = &mut service {
+                        match s.capture(context, text, source, trusted) {
+                            Ok(()) => true,
+                            Err(e) => {
+                                s.last_error = Some(e);
+                                false
+                            }
+                        }
+                    } else {
+                        false
+                    };
+                    let _ = committed.send(saved);
                 }
                 Ok(Message::Clipboard {
                     text,
@@ -631,9 +656,14 @@ pub fn launch() -> Result<SyncSender<Message>, String> {
     });
     Ok(tx)
 }
-fn clipboard_watch(tx: SyncSender<Message>, settings: Arc<RwLock<Preferences>>) {
+fn clipboard_watch(
+    tx: SyncSender<Message>,
+    settings: Arc<RwLock<Preferences>>,
+    health: Arc<RwLock<crate::capture::CaptureHealth>>,
+) {
     std::thread::spawn(move || {
         let Ok(automation) = uiautomation::UIAutomation::new() else {
+            crate::capture::report(&health, "", "Clipboard accessibility check unavailable");
             return;
         };
         let mut sequence = crate::platform::clipboard_sequence();
@@ -653,7 +683,8 @@ fn clipboard_watch(tx: SyncSender<Message>, settings: Arc<RwLock<Preferences>>) 
                 sequence = current;
                 continue;
             }
-            let Some((_, exe, _)) = crate::platform::foreground() else {
+            let Some((pid, exe, title)) = crate::platform::foreground() else {
+                crate::capture::report(&health, "", "No foreground app for clipboard copy");
                 sequence = current;
                 continue;
             };
@@ -661,22 +692,47 @@ fn clipboard_watch(tx: SyncSender<Message>, settings: Arc<RwLock<Preferences>>) 
             // are excluded rather than guessing private mode. Use an allowed image editor
             // or Snipping Tool for image copies; the companion handles browser drafts only.
             if !crate::capture::allowed(&exe, &prefs) {
+                crate::capture::report(&health, &exe, "Clipboard source excluded or not enabled");
+                sequence = current;
+                continue;
+            }
+            // A clipboard copied in a different app must not be attributed to the
+            // newly focused allowed app (especially after leaving a browser/password manager).
+            if !crate::platform::clipboard_owner_pid()
+                .is_some_and(|owner| crate::platform::same_application_process(pid, owner))
+            {
+                crate::capture::report(
+                    &health,
+                    &exe,
+                    "Windows could not verify the clipboard owner; copy skipped",
+                );
                 sequence = current;
                 continue;
             }
             let safe = automation.get_focused_element().ok().is_some_and(|el| {
                 el.is_password().ok() == Some(false)
+                    && el
+                        .get_process_id()
+                        .ok()
+                        .is_some_and(|owner| crate::platform::same_application_process(pid, owner))
                     && !crate::capture::sensitive(&el.get_name().unwrap_or_default())
             });
             if !safe {
+                crate::capture::report(
+                    &health,
+                    &exe,
+                    "Clipboard focus was protected or could not be verified",
+                );
                 sequence = current;
                 continue;
             }
             let Ok(mut clipboard) = arboard::Clipboard::new() else {
+                crate::capture::report(&health, &exe, "Clipboard busy; retrying");
                 continue;
             };
             let result = if let Ok(image) = clipboard.get_image() {
                 if image.width.saturating_mul(image.height) > 16_000_000 {
+                    crate::capture::report(&health, &exe, "Copied image exceeds the pixel limit");
                     sequence = current;
                     continue;
                 }
@@ -696,8 +752,23 @@ fn clipboard_watch(tx: SyncSender<Message>, settings: Arc<RwLock<Preferences>>) 
                 clipboard.get_text().ok().map(|text| (text, "clipboard"))
             };
             if let Some((text, kind)) = result {
+                if crate::platform::foreground() != Some((pid, exe.clone(), title))
+                    || crate::platform::clipboard_sequence() != current
+                {
+                    crate::capture::report(
+                        &health,
+                        &exe,
+                        "Focus or clipboard changed while reading; retrying",
+                    );
+                    continue;
+                }
                 sequence = current;
                 if text.is_empty() || text.len() > 6 * 1024 * 1024 {
+                    crate::capture::report(
+                        &health,
+                        &exe,
+                        "Clipboard is empty or exceeds the size limit",
+                    );
                     continue;
                 }
                 let hash = blake3::hash(text.as_bytes()).to_hex().to_string();
@@ -705,12 +776,24 @@ fn clipboard_watch(tx: SyncSender<Message>, settings: Arc<RwLock<Preferences>>) 
                     continue;
                 }
                 previous = hash;
+                crate::capture::report(
+                    &health,
+                    &exe,
+                    "Clipboard snapshot sent to the local writer",
+                );
                 let _ = tx.send(Message::Clipboard {
                     text,
                     kind: kind.into(),
                     source: format!("Clipboard · {}", exe.trim_end_matches(".exe")),
                     sequence,
                 });
+            } else {
+                crate::capture::report(
+                    &health,
+                    &exe,
+                    "No supported text or bitmap clipboard format",
+                );
+                sequence = current;
             }
         }
     });
