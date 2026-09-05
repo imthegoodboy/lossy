@@ -55,7 +55,14 @@ fn transfer(stream: &mut Stream, bytes: &mut [u8], write: bool) -> Result<(), St
             stream.read(&mut bytes[done..])
         };
         match result {
-            Ok(0) => return Err("Connection closed".into()),
+            // Windows PIPE_NOWAIT may report a successful zero-byte read while the
+            // peer is connected but has not written yet. It is not a Unix EOF.
+            Ok(0) => {
+                if Instant::now() > deadline {
+                    return Err("Background process timed out".into());
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            }
             Ok(n) => done += n,
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 if Instant::now() > deadline {
@@ -86,4 +93,36 @@ pub fn send(stream: &mut Stream, value: &Value) -> Result<(), String> {
     }
     transfer(stream, &mut (body.len() as u32).to_le_bytes(), true)?;
     transfer(stream, &mut body, true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn connected_peer_can_delay_and_fragment_its_first_frame() {
+        let name = format!("lossy-synthetic-ipc-{}", std::process::id());
+        let listener = ListenerOptions::new()
+            .name(name.to_ns_name::<GenericNamespaced>().unwrap())
+            .create_sync()
+            .unwrap();
+        let server = std::thread::spawn(move || {
+            let mut stream = listener.accept().unwrap();
+            stream.set_nonblocking(true).unwrap();
+            let value = receive(&mut stream).unwrap();
+            assert_eq!(value["test"], "synthetic");
+            send(&mut stream, &value).unwrap();
+        });
+        let mut client = Stream::connect(name.to_ns_name::<GenericNamespaced>().unwrap()).unwrap();
+        std::thread::sleep(Duration::from_millis(30));
+        let bytes = br#"{"test":"synthetic"}"#;
+        client
+            .write_all(&(bytes.len() as u32).to_le_bytes())
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(30));
+        client.write_all(bytes).unwrap();
+        client.set_nonblocking(true).unwrap();
+        assert_eq!(receive(&mut client).unwrap()["test"], "synthetic");
+        server.join().unwrap();
+    }
 }

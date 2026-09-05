@@ -50,6 +50,11 @@ jobs:
       - name: Run tests
         run: cargo test --workspace --locked
 
+      - name: Test actual background process and native messaging
+        run: |
+          cargo build -p lossy --locked -j 2
+          ./scripts/smoke-installed.ps1 -Executable (Resolve-Path target/debug/lossy.exe).Path
+
       - name: Package Windows installer
         working-directory: apps/desktop
         env:
