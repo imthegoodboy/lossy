@@ -25,13 +25,15 @@ jobs:
 
       - name: Install required Rust components
         shell: pwsh
-        run: rustup component add rustfmt clippy
+        run: |
+          rustup toolchain install 1.88.0 --profile minimal --component rustfmt,clippy
+          rustup override set 1.88.0
 
       - name: Check formatting
         run: cargo fmt --all -- --check
 
       - name: Run Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Run tests
         run: cargo test --workspace --locked
