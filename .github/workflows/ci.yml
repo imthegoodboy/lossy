@@ -17,7 +17,7 @@ jobs:
   rust:
     name: Rust checks
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
 
     steps:
       - name: Check out repository
@@ -28,6 +28,18 @@ jobs:
         run: |
           rustup toolchain install 1.88.0 --profile minimal --component rustfmt,clippy
           rustup override set 1.88.0
+
+      - name: Build desktop frontend
+        working-directory: apps/desktop
+        run: |
+          npm ci
+          npm run build
+
+      - name: Check companion JavaScript
+        run: |
+          node --check integrations/browser/content.js
+          node --check integrations/browser/worker.js
+          node --check integrations/browser/popup.js
 
       - name: Check formatting
         run: cargo fmt --all -- --check

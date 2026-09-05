@@ -6,9 +6,14 @@ CREATE TABLE metadata (
 CREATE TABLE drafts (
     id BLOB PRIMARY KEY CHECK(length(id)=16),
     context BLOB NOT NULL CHECK(length(context)=32),
-    current_revision INTEGER NOT NULL CHECK(current_revision>0)
+    current_revision INTEGER NOT NULL CHECK(current_revision>0),
+    kind TEXT NOT NULL DEFAULT 'draft',
+    pinned INTEGER NOT NULL DEFAULT 0,
+    active INTEGER NOT NULL DEFAULT 0
 ) STRICT;
+CREATE TABLE preferences(name TEXT PRIMARY KEY, payload BLOB NOT NULL) STRICT;
 CREATE INDEX drafts_context ON drafts(context);
+CREATE UNIQUE INDEX one_active_draft ON drafts(context) WHERE active=1;
 CREATE TABLE revisions (
     draft_id BLOB NOT NULL REFERENCES drafts(id) ON DELETE CASCADE,
     revision INTEGER NOT NULL CHECK(revision>0),

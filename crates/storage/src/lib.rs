@@ -15,7 +15,7 @@ use std::{
 use zeroize::Zeroizing;
 
 pub type Result<T> = std::result::Result<T, StoreError>;
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 const MAX_PAYLOAD: usize = 8 * 1024 * 1024;
 const KEY_AAD: &[u8] = b"lossy/key-check/v1";
 
@@ -70,6 +70,8 @@ pub struct SavedDraft {
     pub revision: i64,
     pub updated_ms: i64,
     pub content: DraftContent,
+    pub kind: String,
+    pub pinned: bool,
 }
 
 /// A per-user store. Opening an existing database never regenerates a missing key.
@@ -86,7 +88,7 @@ impl Store {
         let mut connection = Connection::open(path)?;
         connection.busy_timeout(Duration::from_secs(2))?;
         let version: i64 = connection.pragma_query_value(None, "user_version", |r| r.get(0))?;
-        if existed && version != SCHEMA_VERSION {
+        if existed && !(1..=SCHEMA_VERSION).contains(&version) {
             return Err(StoreError::InvalidSchema);
         }
         connection.pragma_update(None, "journal_mode", "WAL")?;
@@ -125,8 +127,16 @@ impl Store {
             }
             cipher
         };
+        if existed && version == 1 {
+            let tx = connection.transaction()?;
+            tx.execute_batch("ALTER TABLE drafts ADD COLUMN kind TEXT NOT NULL DEFAULT 'draft'; ALTER TABLE drafts ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0; ALTER TABLE drafts ADD COLUMN active INTEGER NOT NULL DEFAULT 0; CREATE UNIQUE INDEX one_active_draft ON drafts(context) WHERE active=1; CREATE TABLE preferences(name TEXT PRIMARY KEY, payload BLOB NOT NULL) STRICT;")?;
+            tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+            tx.commit()?;
+        }
         let store = Self { connection, cipher };
-        store.verify_integrity()?;
+        // Full authenticated history verification is explicit (backups/diagnostics). Current
+        // payloads are authenticated on read, keeping normal logon bounded for large histories.
+        store.check_structure()?;
         Ok(store)
     }
 
@@ -136,6 +146,18 @@ impl Store {
     }
 
     pub fn create(&mut self, context: [u8; 32], content: &DraftContent) -> Result<SavedDraft> {
+        self.create_kind(context, content, "draft")
+    }
+
+    pub fn create_kind(
+        &mut self,
+        context: [u8; 32],
+        content: &DraftContent,
+        kind: &str,
+    ) -> Result<SavedDraft> {
+        if !["draft", "note", "clipboard", "image"].contains(&kind) {
+            return Err(StoreError::InvalidPayload);
+        }
         let mut id = [0; 16];
         getrandom::fill(&mut id).map_err(|_| StoreError::Randomness)?;
         let id = ItemId(id);
@@ -146,9 +168,15 @@ impl Store {
         let tx = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if kind == "draft" {
+            tx.execute(
+                "UPDATE drafts SET active=0 WHERE context=?1 AND active=1",
+                [context.as_slice()],
+            )?;
+        }
         tx.execute(
-            "INSERT INTO drafts(id, context, current_revision) VALUES(?1, ?2, 1)",
-            params![id.0.as_slice(), context.as_slice()],
+            "INSERT INTO drafts(id, context, current_revision, kind, active) VALUES(?1, ?2, 1, ?3, ?4)",
+            params![id.0.as_slice(), context.as_slice(), kind, kind == "draft"],
         )?;
         tx.execute(
             "INSERT INTO revisions(draft_id, revision, updated_ms, payload) VALUES(?1, 1, ?2, ?3)",
@@ -161,6 +189,8 @@ impl Store {
             revision: 1,
             updated_ms,
             content: content.clone(),
+            kind: kind.into(),
+            pinned: false,
         })
     }
 
@@ -204,6 +234,8 @@ impl Store {
             revision,
             updated_ms,
             content: content.clone(),
+            kind: latest.kind,
+            pinned: latest.pinned,
         })
     }
 
@@ -232,12 +264,19 @@ impl Store {
         let plain = self
             .cipher
             .open(&sealed, &aad(id, context, revision, updated_ms))?;
+        let (kind, pinned) = self.connection.query_row(
+            "SELECT kind,pinned FROM drafts WHERE id=?1",
+            [id.0.as_slice()],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
         Ok(SavedDraft {
             id,
             context,
             revision,
             updated_ms,
             content: decode(&plain)?,
+            kind,
+            pinned,
         })
     }
 
@@ -293,9 +332,26 @@ impl Store {
         Ok(())
     }
 
-    /// SQLite integrity plus authenticated reads of all checkpoints. Run at open/backup,
+    /// SQLite integrity plus authenticated reads of all checkpoints. Run at backup/diagnostics,
     /// not inside capture callbacks. Corruption never triggers automatic deletion or reset.
     pub fn verify_integrity(&self) -> Result<()> {
+        self.check_structure()?;
+        let mut statement = self
+            .connection
+            .prepare("SELECT draft_id, revision FROM revisions")?;
+        let rows =
+            statement.query_map([], |r| Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, i64>(1)?)))?;
+        for row in rows {
+            let (id, revision) = row?;
+            self.revision(
+                ItemId(id.try_into().map_err(|_| StoreError::Corrupt)?),
+                revision,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn check_structure(&self) -> Result<()> {
         let check: String = self
             .connection
             .query_row("PRAGMA quick_check", [], |r| r.get(0))?;
@@ -310,22 +366,87 @@ impl Store {
         if violations != 0 {
             return Err(StoreError::Corrupt);
         }
-        let mut statement = self
-            .connection
-            .prepare("SELECT draft_id, revision FROM revisions")?;
-        let rows =
-            statement.query_map([], |r| Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, i64>(1)?)))?;
-        for row in rows {
-            let (id, revision) = row?;
-            self.revision(
-                ItemId(id.try_into().map_err(|_| StoreError::Corrupt)?),
-                revision,
-            )?;
-        }
         let missing: i64 = self.connection.query_row("SELECT count(*) FROM drafts d WHERE d.current_revision IS NOT (SELECT MAX(r.revision) FROM revisions r WHERE r.draft_id=d.id)", [], |r| r.get(0))?;
         if missing != 0 {
             return Err(StoreError::Corrupt);
         }
+        Ok(())
+    }
+
+    pub fn preference(&self, name: &str) -> Result<Option<String>> {
+        let encrypted: Option<Vec<u8>> = self
+            .connection
+            .query_row(
+                "SELECT payload FROM preferences WHERE name=?1",
+                [name],
+                |r| r.get(0),
+            )
+            .optional()?;
+        encrypted
+            .map(|bytes| {
+                String::from_utf8(
+                    self.cipher
+                        .open(&bytes, format!("lossy/pref/{name}").as_bytes())?
+                        .to_vec(),
+                )
+                .map_err(|_| StoreError::InvalidPayload)
+            })
+            .transpose()
+    }
+
+    pub fn set_preference(&mut self, name: &str, value: &str) -> Result<()> {
+        if value.len() > MAX_PAYLOAD || name.len() > 256 {
+            return Err(StoreError::TooLarge);
+        }
+        let sealed = self
+            .cipher
+            .seal(value.as_bytes(), format!("lossy/pref/{name}").as_bytes())?;
+        self.connection.execute("INSERT INTO preferences(name,payload) VALUES(?1,?2) ON CONFLICT(name) DO UPDATE SET payload=excluded.payload", params![name,sealed])?;
+        Ok(())
+    }
+
+    pub fn pin(&mut self, id: ItemId, pinned: bool) -> Result<()> {
+        if self.connection.execute(
+            "UPDATE drafts SET pinned=?1 WHERE id=?2",
+            params![pinned, id.0.as_slice()],
+        )? != 1
+        {
+            return Err(StoreError::NotFound);
+        }
+        Ok(())
+    }
+
+    /// Context ownership is committed with the first checkpoint, not a later memory-only map.
+    pub fn active(&self, context: [u8; 32]) -> Result<Option<SavedDraft>> {
+        let id: Option<Vec<u8>> = self
+            .connection
+            .query_row(
+                "SELECT id FROM drafts WHERE context=?1 AND active=1",
+                [context.as_slice()],
+                |r| r.get(0),
+            )
+            .optional()?;
+        id.map(|id| self.latest(ItemId(id.try_into().map_err(|_| StoreError::Corrupt)?)))
+            .transpose()
+    }
+
+    pub fn finish(&mut self, context: [u8; 32]) -> Result<()> {
+        self.connection.execute(
+            "UPDATE drafts SET active=0 WHERE context=?1 AND active=1",
+            [context.as_slice()],
+        )?;
+        Ok(())
+    }
+
+    /// All retained revisions are independent checkpoints. Bound history growth per draft.
+    pub fn compact(&mut self, keep: u32) -> Result<()> {
+        let keep = keep.max(2);
+        self.connection.execute("DELETE FROM revisions WHERE revision < (SELECT current_revision FROM drafts WHERE id=draft_id) - ?1 AND revision != 1",[keep])?;
+        Ok(())
+    }
+
+    pub fn retain_since(&mut self, cutoff_ms: i64) -> Result<()> {
+        self.connection.execute("DELETE FROM drafts WHERE pinned=0 AND id IN (SELECT draft_id FROM revisions r WHERE revision=current_revision AND updated_ms<?1)",[cutoff_ms])?;
         Ok(())
     }
 }

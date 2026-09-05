@@ -1,0 +1,30 @@
+[package]
+name = "lossy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+default-run = "lossy"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2.11.5", features = ["tray-icon", "image-png"] }
+lossy-storage = { path = "../../../crates/storage" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+blake3.workspace = true
+getrandom.workspace = true
+interprocess = "2.4.4"
+widestring = "1"
+# 0.25.1 references its input module even for read-only clients. Lossy uses no input APIs.
+uiautomation = { version = "0.25.1", default-features = false, features = ["pattern", "input"] }
+arboard = "3.6.1"
+image = { version = "0.25", default-features = false, features = ["png"] }
+base64 = "0.22"
+tempfile = "3"
+winreg = "0.55"
+windows = { workspace = true, features = ["Win32_UI_WindowsAndMessaging", "Win32_System_Threading", "Win32_System_DataExchange", "Win32_Security", "Win32_Security_Authorization", "Win32_System_StationsAndDesktops"] }
+
+[lints.rust]
+unsafe_code = "warn"
