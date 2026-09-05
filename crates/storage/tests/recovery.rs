@@ -147,7 +147,7 @@ fn ciphertext_swaps_and_metadata_tampering_are_rejected() {
             .execute(tamper, [])
             .unwrap();
         assert!(matches!(
-            Store::open(&path),
+            Store::open(&path).and_then(|store| store.verify_integrity()),
             Err(StoreError::Authentication)
         ));
     }
@@ -248,6 +248,57 @@ fn payload_limits_and_debug_redaction() {
     let debug = format!("{saved:?}");
     assert!(!debug.contains("Synthetic private sentinel"));
     assert!(!debug.contains("Synthetic pink note"));
+}
+
+#[test]
+fn active_context_retention_preferences_and_compaction() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("lossy.db");
+    let mut s = Store::open(&path).unwrap();
+    s.set_preference("settings", "Synthetic private setting")
+        .unwrap();
+    assert_eq!(
+        s.preference("settings").unwrap().as_deref(),
+        Some("Synthetic private setting")
+    );
+    let mut a = s.create([1; 32], &sample("one")).unwrap();
+    for revision in 1..40 {
+        a = s
+            .update(a.id, revision, &sample(&format!("revision {revision}")))
+            .unwrap();
+    }
+    s.compact(5).unwrap();
+    assert!(s.revision(a.id, 1).is_ok());
+    assert_eq!(s.revision(a.id, 2), Err(StoreError::NotFound));
+    assert_eq!(s.active([1; 32]).unwrap().unwrap(), a);
+    s.pin(a.id, true).unwrap();
+    s.create([2; 32], &sample("expired")).unwrap();
+    s.retain_since(i64::MAX).unwrap();
+    assert_eq!(s.list(20, 0).unwrap().len(), 1);
+    s.finish([1; 32]).unwrap();
+    assert!(s.active([1; 32]).unwrap().is_none());
+    s.verify_integrity().unwrap();
+    drop(s);
+    for entry in std::fs::read_dir(dir.path()).unwrap() {
+        let bytes = std::fs::read(entry.unwrap().path()).unwrap();
+        let secret = b"Synthetic private setting";
+        assert!(!bytes.windows(secret.len()).any(|w| w == secret));
+    }
+}
+
+#[test]
+fn schema_one_migrates_without_changing_encrypted_history() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("lossy.db");
+    let mut s = Store::open(&path).unwrap();
+    let saved = s.create([1; 32], &sample("Existing v1 history")).unwrap();
+    drop(s);
+    let c = Connection::open(&path).unwrap();
+    c.execute_batch("DROP INDEX one_active_draft; ALTER TABLE drafts DROP COLUMN active; ALTER TABLE drafts DROP COLUMN pinned; ALTER TABLE drafts DROP COLUMN kind; DROP TABLE preferences; PRAGMA user_version=1;").unwrap();
+    drop(c);
+    let s = Store::open(&path).unwrap();
+    assert_eq!(s.latest(saved.id).unwrap(), saved);
+    s.verify_integrity().unwrap();
 }
 
 #[test]

@@ -1,5 +1,8 @@
 # Rust
 /target/
+/output/
+/.playwright-cli/
+apps/desktop/src-tauri/gen/
 **/*.rs.bk
 
 # Node and frontend builds
@@ -42,3 +45,12 @@ Desktop.ini
 *.temp
 *.log
 
+# Generated platform icons outside the Windows release target
+apps/desktop/src-tauri/icons/android/
+apps/desktop/src-tauri/icons/ios/
+apps/desktop/src-tauri/icons/*.icns
+apps/desktop/src-tauri/icons/Square*.png
+apps/desktop/src-tauri/icons/StoreLogo.png
+playwright-report/
+test-results/
+artifacts/

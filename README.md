@@ -4,7 +4,11 @@ Lossy is a Windows-first, fully local draft-recovery and smart-clipboard app. It
 
 ## Status
 
-Lossy is currently in the architecture and feasibility stage. The implementation will prioritize capture correctness, local privacy, and crash-safe persistence before broader application support.
+The Windows app has one soft-pink archive with four clickable cards per desktop row, no logo,
+navigation or page toolbar. Each card opens a reading popup with Copy, persistent colours,
+pinning, editing recovery copies, revision history and deletion. It includes a windowless tray agent, opt-in native capture, encrypted persistence,
+retention, rotating backups and a Chrome/Edge companion. See the [user guide](docs/user-guide.md)
+for installation, supported sources, limits and recovery. This first release is unsigned.
 
 Read the complete [product and technical architecture](./plan.md).
 
@@ -23,15 +27,32 @@ The first release targets Windows 10/11 x64.
 
 ## Development
 
-The workspace contains the capture-context types, draft state machine, and Windows-protected
-encrypted revision store. It does not yet include a desktop window or enable background capture.
-Rust 1.88 or later and the Windows MSVC build tools are required.
+Windows 10/11 x64, Rust 1.88+, Node.js 22+, WebView2 and the Windows MSVC build tools are required.
 
 ```powershell
+cd apps/desktop
+npm ci
+npm run build
+cd ../..
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --locked
+cd apps/desktop
+npm run tauri -- build
 ```
+
+Installer output is under `target/release/bundle/nsis`. For development, run `npm run tauri -- dev`
+from `apps/desktop`. Use `-j 1` for Cargo builds on low-memory machines.
+
+Download packaged builds from [Releases](https://github.com/imthegoodboy/lossy/releases).
+Accept the one-time inline capture permission; then enable the
+[browser companion](docs/browser-companion.md) on selected websites.
+
+Native editors are sampled approximately every 35 ms and clipboard changes every 100 ms.
+Browser input events forward immediately, with a 200 ms fallback for programmatic clearing.
+These are sampling intervals, not latency guarantees. Only **committed, observed** snapshots
+are recoverable: no app can guarantee recovering a key not yet exposed by the source app or
+flushed to disk before power loss. Unsupported/private/protected fields are skipped.
 
 Implementation changes are developed on focused branches and merged through pull requests.
 

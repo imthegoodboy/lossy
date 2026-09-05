@@ -1,5 +1,9 @@
 # Lossy — Product and Technical Architecture Plan
 
+Implementation status: the Windows runtime and installer are implemented. This remains the
+target architecture; [runtime decisions](docs/implementation.md) and the [user guide](docs/user-guide.md)
+describe shipped behavior and known limits precisely.
+
 ## 1. Product definition
 
 **Lossy** is a Windows-first, fully local draft-recovery and smart-clipboard application. It quietly records changes made inside supported text editors and clipboard copies, organizes them by application and working context, and lets the user recover, edit, or copy previous content after an application crash, accidental navigation, or computer restart.

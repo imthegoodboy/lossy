@@ -2,7 +2,7 @@
 
 The `lossy-storage` crate provides a Windows-only local store. Each create/update returns
 only after its SQLite transaction commits with WAL and `synchronous=FULL`. The desktop and
-capture agent are not wired up yet; all existing tests use synthetic content in temporary folders.
+agent now use the store; tests use synthetic content in temporary folders.
 
 ## Data and keys
 
@@ -21,7 +21,8 @@ this does not protect against malware already running as the same Windows user.
 
 SQLite schema, random IDs, opaque context keys, revision counts, sizes, and timestamps are
 not encrypted. Raw text, headings, source labels, and plaintext search indexes never enter SQLite.
-Context keys supplied by callers must already be derived by `lossy-capture-core`.
+Context keys supplied by callers must already be keyed hashes; the agent uses a per-install secret.
+Kind, pinned status and active-context ownership are also unencrypted metadata in schema v2.
 
 ## Revision rules
 
@@ -34,9 +35,9 @@ Context keys supplied by callers must already be derived by `lossy-capture-core`
 - Reads and integrity checks reject a current-revision pointer rolled back below the latest checkpoint.
 - Corrupt storage never triggers deletion or silent fallback to an older backup.
 
-Full checkpoints deliberately keep the first implementation easy to recover. Delta compaction,
-retention, automatic backup rotation, image blobs, and state-engine replay remain subsequent work.
-Do not connect unrestricted large-document capture until retention and compaction are available.
+Full checkpoints keep recovery independent of delta chains. The runtime compacts old revisions,
+expires unpinned items and rotates three verified backups. Images are capped encrypted base64 PNG
+payloads in the same store. Active context ownership is committed atomically with new drafts.
 The current payload cap is 8 MiB per checkpoint and result pages are capped at 200 items.
 
 ## Verification and boundaries
@@ -51,9 +52,9 @@ That test verifies process-crash recovery, not physical power-loss behavior. Har
 flush behavior still needs VM power-cut and device testing. No claim is made that physical keys
 not yet observed by the capture adapter are recoverable.
 
-Opening currently performs an authenticated scan of all revisions. This favors correctness for
-the initial storage milestone but will need bounded background verification before large histories
-are enabled. Successful writes are not a benchmark; latency still needs measurement on the agent.
+Opening checks SQLite structure. Payloads authenticate on read, while explicit Verify and backups
+scan all history. Large searches and verified backups can delay the single writer; separate
+maintenance scheduling and disk-size quotas remain production scaling improvements.
 
 Native DPAPI calls are confined to `dpapi.rs`, with documented pointer ownership and cleanup.
 The rest of the storage crate denies unsafe code; the platform-independent crates forbid it.

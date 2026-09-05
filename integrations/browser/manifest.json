@@ -1,0 +1,10 @@
+{
+ "manifest_version":3,"name":"Lossy · Keep my drafts","version":"0.1.0",
+ "description":"Save drafts on websites you choose to your local Lossy archive.",
+ "key":"MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0S+ro7Xws0hsd51bGDHmZVYEUubfD8o20M3R4iqkjCHKAz8PpJrO26JCNP1DQ62A1wrLoBLD1cme/aloaOercNamssfdRIuAH8+j00RuB05YIIRcse+24fiKjcXXM4lE3DwGa4JnqUtNAquoMcwQIEzykTDapzVTHfiloTa5ycHQTIr/icIJANCwpxRtv3xQL+oufzMgzOMLvpQVj8OStxYeKjr0exFs2YJ9n2jwVYkYD5MwOWzYBCAhuFzprdgHwPn0FR2hOOSEzDzSCz1YsttPF/wOH4dGsI17xgn1Rr8+av18MvYy38fkt7kqOCPxxkdb8aDGNz2X+XuHrC74oQIDAQAB",
+ "permissions":["nativeMessaging","storage","scripting","activeTab"],
+ "optional_host_permissions":["https://*/*","http://localhost/*","http://127.0.0.1/*"],
+ "background":{"service_worker":"worker.js"},
+ "action":{"default_popup":"popup.html","default_title":"Lossy draft saving"},
+ "incognito":"not_allowed"
+}

@@ -3,6 +3,7 @@ members = [
     "crates/capture-core",
     "crates/context-engine",
     "crates/storage",
+    "apps/desktop/src-tauri",
 ]
 resolver = "3"
 
