@@ -103,7 +103,7 @@ mod tests {
     fn connected_peer_can_delay_and_fragment_its_first_frame() {
         let name = format!("lossy-synthetic-ipc-{}", std::process::id());
         let listener = ListenerOptions::new()
-            .name(name.to_ns_name::<GenericNamespaced>().unwrap())
+            .name(name.clone().to_ns_name::<GenericNamespaced>().unwrap())
             .create_sync()
             .unwrap();
         let server = std::thread::spawn(move || {

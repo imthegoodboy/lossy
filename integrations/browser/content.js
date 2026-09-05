@@ -64,9 +64,11 @@
     const key = context(el);
     const previous = sent.get(el);
     if (previous?.key === key && previous.text === text) return;
-    const snapshot = {key, text};
+    const snapshot = { key, text };
     sent.set(el, snapshot);
-    const retry = () => { if(sent.get(el) === snapshot) sent.delete(el); };
+    const retry = () => {
+      if (sent.get(el) === snapshot) sent.delete(el);
+    };
     chrome.runtime
       .sendMessage({
         op: "browser_capture",
@@ -75,7 +77,9 @@
         source: `${location.hostname} · ${document.title.slice(0, 160)}`,
         secure: false,
       })
-      .then(reply => { if(!reply?.ok) retry(); })
+      .then((reply) => {
+        if (!reply?.ok) retry();
+      })
       .catch(retry);
   }
   document.addEventListener("input", (e) => save(e.target), true);

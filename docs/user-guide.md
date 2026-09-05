@@ -55,6 +55,6 @@ is unresponsive; if necessary quit only Lossy from the tray/Task Manager first. 
 database merely to clear an error. Unobserved or uncommitted input cannot be recovered.
 
 Startup uses the current-user scheduled task **Lossy Background Recovery**, normal privileges,
-`lossy.exe --agent`, no window. It cannot capture before sign-in. If registration is refused,
-deselect startup and run manually. Uninstall removes startup and host registration, but keeps
+`lossy.exe --agent`, no window. If task registration is denied, a current-user Run entry is used
+as a fallback. It cannot capture before sign-in. Uninstall removes startup and host registration, but keeps
 your encrypted history. Remove the unpacked browser extension separately.

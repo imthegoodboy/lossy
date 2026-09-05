@@ -122,15 +122,34 @@ pub fn open_ui() {
 
 pub fn startup(enable: bool) -> Result<(), String> {
     let task = "Lossy Background Recovery";
+    let (run, _) = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
+        .create_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Run")
+        .map_err(|_| "Windows startup preferences are unavailable")?;
     if !enable {
-        let _ = Command::new("schtasks.exe")
+        if run.get_raw_value("Lossy").is_ok() {
+            run.delete_value("Lossy")
+                .map_err(|_| "Could not disable Lossy startup")?;
+        }
+        let exists = Command::new("schtasks.exe")
+            .args(["/Query", "/TN", task])
+            .creation_flags(0x08000000)
+            .output()
+            .is_ok_and(|out| out.status.success());
+        if !exists {
+            return Ok(());
+        }
+        let result = Command::new("schtasks.exe")
             .args(["/Delete", "/TN", task, "/F"])
             .creation_flags(0x08000000)
-            .output();
+            .output()
+            .map_err(|_| "Could not disable the Lossy startup task")?;
+        if !result.status.success() {
+            return Err("Windows refused to disable the Lossy startup task".into());
+        }
         return Ok(());
     }
-    let exe = std::env::current_exe().map_err(|_| "Executable unavailable")?;
-    let exe = exe
+    let executable = std::env::current_exe().map_err(|_| "Executable unavailable")?;
+    let exe = executable
         .to_string_lossy()
         .replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -152,9 +171,15 @@ pub fn startup(enable: bool) -> Result<(), String> {
         .output()
         .map_err(|_| "Could not register startup")?;
     if !out.status.success() {
-        return Err(
-            "Windows refused startup registration. You can still run Lossy manually.".into(),
-        );
+        // Standard-user policy may reject scheduled tasks. HKCU Run still gives a visible,
+        // user-controllable, non-elevated sign-in launch without opening the archive window.
+        run.set_value("Lossy", &format!("\"{}\" --agent", executable.display()))
+            .map_err(
+                |_| "Windows refused startup registration. You can still run Lossy manually.",
+            )?;
+    } else if run.get_raw_value("Lossy").is_ok() {
+        run.delete_value("Lossy")
+            .map_err(|_| "Could not remove duplicate startup registration")?;
     }
     Ok(())
 }

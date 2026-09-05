@@ -1,4 +1,4 @@
-param([string]$Executable = "$env:LOCALAPPDATA\Programs\Lossy\lossy.exe")
+param([string]$Executable = "$env:LOCALAPPDATA\Programs\Lossy\lossy.exe", [switch]$Interactive)
 $ErrorActionPreference = 'Stop'
 if (Get-Process lossy -ErrorAction SilentlyContinue) { throw 'Quit Lossy before the isolated smoke test.' }
 $testDirectory = Join-Path ([IO.Path]::GetTempPath()) ('lossy-smoke-' + [guid]::NewGuid().ToString('N'))
@@ -85,6 +85,23 @@ try {
         $hostProcess.StandardInput.Close()
         if(!$hostProcess.WaitForExit(3000)) { $hostProcess.Kill() }
     } finally { if(!$hostProcess.HasExited) {$hostProcess.Kill()}; $hostProcess.Dispose() }
+    if($Interactive) {
+        $prefs.allowed_apps=@('pwsh.exe'); $prefs.clipboard=$true
+        $null = Request-Lossy @{op='settings';prefs=$prefs}
+        $fixtureScript = Join-Path $PSScriptRoot 'synthetic-editor.ps1'
+        $fixture = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList '-NoProfile','-STA','-File',('"'+$fixtureScript+'"') -WindowStyle Hidden -PassThru
+        try { if(!$fixture.WaitForExit(15000)) { throw 'Synthetic editor timed out' } }
+        finally { if(!$fixture.HasExited) {$fixture.Kill()};$fixture.Dispose() }
+        $prefs.allowed_apps=@();$prefs.clipboard=$false
+        $null = Request-Lossy @{op='settings';prefs=$prefs}
+        $archive = (Request-Lossy @{op='list'}).items
+        if(!($archive | Where-Object {$_.kind -eq 'draft' -and $_.text -eq 'Synthetic native draft continued'})) { throw 'Native UIA capture failed' }
+        if(!($archive | Where-Object {$_.kind -eq 'clipboard' -and $_.text -eq 'Synthetic clipboard text'})) { throw 'Clipboard text capture failed' }
+        $picture = $archive | Where-Object kind -eq 'image' | Select-Object -First 1
+        if(!$picture -or !$picture.text) { throw 'Clipboard image capture failed' }
+        $null = Request-Lossy @{op='copy';id=$picture.id}
+        Write-Output 'PASS: real UI Automation text, native clipboard text/image capture, thumbnail and image copy command.'
+    }
     Write-Output 'PASS: installed agent, no startup window, isolated contexts, crash recovery, new-message boundary, private exclusion, integrity, backup and native messaging.'
 } finally {
     if($agent) { if(!$agent.HasExited) {$agent.Kill();$agent.WaitForExit()};$agent.Dispose() }

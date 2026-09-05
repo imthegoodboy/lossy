@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createRoot } from "react-dom/client";
+import { createPortal } from "react-dom";
 import {
   Heart,
   SquaresFour,
@@ -489,12 +490,16 @@ function App() {
           notify={notify}
         />
       )}
-      {toast && (
-        <div className="toast" role="status">
-          <Check size={18} />
-          {toast}
-        </div>
-      )}
+      {toast &&
+        createPortal(
+          <div className="toast" role="status">
+            <Check size={18} />
+            {toast}
+          </div>,
+          ((selected || newNote || settings || onboarding) &&
+            document.querySelector("dialog[open]")) ||
+            document.body,
+        )}
     </div>
   );
 }
@@ -522,8 +527,8 @@ function Editor({
     [dirty, setDirty] = useState(false),
     [confirmClose, setConfirmClose] = useState(false),
     [saveError, setSaveError] = useState("");
-  const latestInput = useRef({heading, text});
-  latestInput.current = {heading, text};
+  const latestInput = useRef({ heading, text });
+  latestInput.current = { heading, text };
   const image = item?.kind === "image";
   const close = () => {
     if (dirty) setConfirmClose(true);
@@ -532,7 +537,8 @@ function Editor({
   // Start a checkpoint as soon as React observes an edit. Serialize writes and save the
   // newest snapshot next if typing continues during the durable disk commit.
   useEffect(() => {
-    if (dirty && !busy && !saveError && !image && !confirmClose) void save(false);
+    if (dirty && !busy && !saveError && !image && !confirmClose)
+      void save(false);
   }, [heading, text, dirty, busy, saveError, image, confirmClose]);
   async function save(announce = true) {
     if (busy) return;
@@ -541,7 +547,13 @@ function Editor({
     try {
       const payload: Record<string, unknown> = {
         op: "save",
-        heading: heading.trim() || "Untitled note",
+        heading:
+          heading.trim() ||
+          text
+            .split("\n")
+            .find((line) => line.trim())
+            ?.slice(0, 72) ||
+          "Untitled note",
         text,
       };
       if (saved?.kind === "note") {
@@ -550,12 +562,16 @@ function Editor({
       }
       const next = await api<Item>(payload);
       setSaved(next);
-      setDirty(latestInput.current.heading !== heading || latestInput.current.text !== text);
-      if (announce) notify(
-        item && item.kind !== "note"
-          ? "Recovery copy saved to My notes"
-          : "Note saved",
+      setDirty(
+        latestInput.current.heading !== heading ||
+          latestInput.current.text !== text,
       );
+      if (announce)
+        notify(
+          item && item.kind !== "note"
+            ? "Recovery copy saved to My notes"
+            : "Note saved",
+        );
       onChange();
     } catch (e) {
       setSaveError(String(e));
@@ -614,7 +630,7 @@ function Editor({
       wide
     >
       <div className="editor-meta">
-        <span>{item?.source || "My notes"}</span>
+        <span>{saved?.source || item?.source || "My notes"}</span>
         <span>{saved ? time(saved.updated) : "Only on this device"}</span>
       </div>
       <label className="field-label">
@@ -666,7 +682,11 @@ function Editor({
               : "Save to keep this note"}
         </span>
       </div>
-      {saveError && <p className="error-banner" role="alert">{saveError} Your changes are still in this window. Try Save again.</p>}
+      {saveError && (
+        <p className="error-banner" role="alert">
+          {saveError} Your changes are still in this window. Try Save again.
+        </p>
+      )}
       {history && item && (
         <div className="history">
           <label>
@@ -766,9 +786,11 @@ function Editor({
       )}
       {confirmClose && (
         <div className="inline-confirm">
-          <p>Your changes haven’t been saved.</p>
+          <p>
+            Some changes are still waiting to save. Earlier autosaves are kept.
+          </p>
           <button className="danger" onClick={onClose}>
-            Discard changes
+            Close without waiting
           </button>
           <button className="secondary" onClick={() => setConfirmClose(false)}>
             Keep editing
