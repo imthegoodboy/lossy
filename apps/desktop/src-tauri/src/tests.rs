@@ -26,6 +26,41 @@ fn capture(s: &mut Service, key: &str, text: &str, trusted: bool) {
 }
 
 #[test]
+fn arrangement_survives_restart_pagination_and_new_capture() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = service(dir.path());
+    let mut ids = Vec::new();
+    for i in 0..65 {
+        let note = s.request(json!({"op":"save","heading":format!("Card {i}"),"text":"Synthetic arrangement test"})).unwrap();
+        ids.push(note["id"].clone());
+    }
+    s.request(json!({"op":"reorder","ids":ids})).unwrap();
+    assert_eq!(items(&mut s)[0]["id"], ids[0]);
+    let last = s.request(json!({"op":"list","offset":60})).unwrap();
+    assert_eq!(last["items"][0]["id"], ids[60]);
+    // A visible-page reorder must preserve the unseen tail.
+    let mut first = ids[..60].to_vec();
+    first.swap(0, 3);
+    s.request(json!({"op":"reorder","ids":first})).unwrap();
+    assert!(
+        s.request(json!({"op":"reorder","ids":[ids[0],ids[0]]}))
+            .is_err()
+    );
+    assert!(
+        s.request(json!({"op":"reorder","ids":["not-an-id"]}))
+            .is_err()
+    );
+    drop(s);
+    let mut s = service(dir.path());
+    assert_eq!(items(&mut s)[0]["id"], ids[3]);
+    capture(&mut s, "arrangement/new", "New synthetic draft", true);
+    assert_eq!(items(&mut s)[0]["id"], ids[3]);
+    let last = s.request(json!({"op":"list","offset":60})).unwrap();
+    assert_eq!(last["items"][0]["id"], ids[60]);
+    assert_eq!(last["items"][5]["text"], "New synthetic draft");
+}
+
+#[test]
 fn conversations_resume_independently_including_after_agent_restart() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = service(dir.path());

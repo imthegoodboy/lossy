@@ -16,9 +16,17 @@ One executable has separate UI and agent processes. Closing the archive cannot s
 The tray agent creates no webview. UIA, clipboard, IPC and writer have separate threads. Capture
 requires onboarding and source allowlists; there are no keyboard hooks, elevated service or telemetry.
 
-The current UI is intentionally only a single scrollable archive with selectable full content.
-No logo, navigation, action buttons, search, editing or popup features. The existing backend
-commands remain for migration compatibility and regression tests; they are not page controls.
+The UI is a single scrollable four-column card matrix, with responsive smaller-window layouts.
+Cards open a full-content dialog with copy, encrypted persistent colour preferences, pinning,
+recovery-copy editing, retained revisions and deletion. Native copy requests carry the viewed
+revision so later background capture cannot change what is copied. The page has no logo,
+navigation, search or button toolbar. Muted paper tones, compact source strips and bottom
+timestamps keep saved content visually primary. Reduced motion disables card movement.
+Drag/drop and Alt + arrow keys save an encrypted ID order, applied in SQLite before pagination.
+Unloaded arranged cards retain their relative order; new items follow the arranged section.
+During a drag/save the UI holds list refreshes; failures restore the previous visible order.
+Concurrent windows use last-accepted layout order without altering content or revisions.
+The native drag handler is disabled for [HTML drag events on Windows](https://v2.tauri.app/reference/javascript/api/namespacewebview/).
 The first-run inline consent checkbox enables supported capture and silent sign-in startup.
 
 Context hashes use a per-install keyed BLAKE3 secret. Schema v2 adds encrypted preferences,

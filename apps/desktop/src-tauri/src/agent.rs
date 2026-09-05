@@ -251,13 +251,21 @@ impl Service {
             ),
             "list" => {
                 let mut results = Vec::new();
+                let order = self
+                    .store
+                    .preference("board-order")
+                    .map_err(|e| e.to_string())?
+                    .unwrap_or_else(|| "[]".into());
                 let search = request["search"].as_str().unwrap_or("").to_lowercase();
                 let filter = request["filter"].as_str().unwrap_or("all");
                 let offset = request["offset"].as_u64().unwrap_or(0).min(100000) as usize;
                 let mut scanned = 0;
                 let mut matched = 0;
                 loop {
-                    let page = self.store.list(10, scanned).map_err(|e| e.to_string())?;
+                    let page = self
+                        .store
+                        .list_in_order(10, scanned, &order)
+                        .map_err(|e| e.to_string())?;
                     if page.is_empty() {
                         break;
                     }
@@ -299,6 +307,42 @@ impl Service {
                 Ok(
                     json!({"items":results.iter().take(60).collect::<Vec<_>>(),"more":results.len()>60}),
                 )
+            }
+            "reorder" => {
+                let ids = request["ids"].as_array().ok_or("Missing card order")?;
+                if ids.len() > 10000 {
+                    return Err("Too many cards to arrange at once".into());
+                }
+                let previous = self
+                    .store
+                    .preference("board-order")
+                    .map_err(|e| e.to_string())?
+                    .unwrap_or_else(|| "[]".into());
+                let previous: Vec<String> =
+                    serde_json::from_str(&previous).map_err(|e| e.to_string())?;
+                let mut order = Vec::new();
+                let mut seen = std::collections::HashSet::new();
+                for value in ids {
+                    let value = value.as_str().ok_or("Invalid card ID")?;
+                    let value = id_text(parse_id(value)?);
+                    if !seen.insert(value.clone()) {
+                        return Err("Duplicate card ID".into());
+                    }
+                    order.push(value);
+                }
+                // Keep unloaded cards in their existing order, never replace captured content.
+                for value in previous {
+                    if order.len() < 10000 && seen.insert(value.clone()) {
+                        order.push(value);
+                    }
+                }
+                self.store
+                    .set_preference(
+                        "board-order",
+                        &serde_json::to_string(&order).map_err(|e| e.to_string())?,
+                    )
+                    .map_err(|e| e.to_string())?;
+                Ok(json!(true))
             }
             "get" => self.render(self.store.latest(id()?).map_err(|e| e.to_string())?, false),
             "revision" => self.render(

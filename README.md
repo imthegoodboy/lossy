@@ -4,8 +4,9 @@ Lossy is a Windows-first, fully local draft-recovery and smart-clipboard app. It
 
 ## Status
 
-The Windows app has a single plain page of saved text and images: no logo, navigation, search,
-action buttons or editor popups. It includes a windowless tray agent, opt-in native capture, encrypted persistence,
+The Windows app has one soft-pink archive with four clickable cards per desktop row, no logo,
+navigation or page toolbar. Each card opens a reading popup with Copy, persistent colours,
+pinning, editing recovery copies, revision history and deletion. It includes a windowless tray agent, opt-in native capture, encrypted persistence,
 retention, rotating backups and a Chrome/Edge companion. See the [user guide](docs/user-guide.md)
 for installation, supported sources, limits and recovery. This first release is unsigned.
 

@@ -282,9 +282,21 @@ impl Store {
 
     /// Bounded page of newest current snapshots; callers can search decrypted pages in memory.
     pub fn list(&self, limit: u32, offset: u32) -> Result<Vec<SavedDraft>> {
-        let mut statement = self.connection.prepare("SELECT d.id FROM drafts d JOIN revisions r ON r.draft_id=d.id AND r.revision=d.current_revision ORDER BY r.updated_ms DESC, d.id LIMIT ?1 OFFSET ?2")?;
+        self.list_in_order(limit, offset, "[]")
+    }
+
+    /// Apply the saved ID order before pagination; content remains encrypted at rest.
+    pub fn list_in_order(
+        &self,
+        limit: u32,
+        offset: u32,
+        order_json: &str,
+    ) -> Result<Vec<SavedDraft>> {
+        let mut statement = self.connection.prepare("SELECT d.id FROM drafts d JOIN revisions r ON r.draft_id=d.id AND r.revision=d.current_revision LEFT JOIN json_each(?3) layout ON lower(hex(d.id))=layout.value ORDER BY coalesce(layout.key, 1000000), r.updated_ms DESC, d.id LIMIT ?1 OFFSET ?2")?;
         let ids = statement
-            .query_map(params![limit.min(200), offset], |r| r.get::<_, Vec<u8>>(0))?
+            .query_map(params![limit.min(200), offset, order_json], |r| {
+                r.get::<_, Vec<u8>>(0)
+            })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         ids.into_iter()
             .map(|id| self.latest(ItemId(id.try_into().map_err(|_| StoreError::Corrupt)?)))

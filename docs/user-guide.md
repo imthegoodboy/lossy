@@ -10,7 +10,7 @@ leaves saving running. **Quit Lossy** in the tray stops saving until the next ap
 
 | Source | Behavior |
 | --- | --- |
-| Archive page | Full saved text and images, selectable text, automatically loaded older items |
+| Archive page | Four-column clickable cards, full-content popup, automatically loaded older items |
 | Native UI Automation Edit fields | Explicit app allowlist, process/window/editor identity |
 | Standard web text boxes | Opt-in [Chrome/Edge companion](browser-companion.md) |
 | WhatsApp Web | Best-effort isolation; uncertain chat switches make separate cards |
@@ -24,9 +24,17 @@ polling is about 35 ms; clipboard polling 100 ms. Neither guarantees every physi
 
 ## Archive
 
-Everything appears in one scrolling page. Select text and press Ctrl+C. Images can be copied
-through the WebView's native context menu. There are no page buttons, navigation, search,
-editing, pinning or popup controls. Existing notes and pinned items remain in storage.
+Everything appears in one scrolling page, four cards across on desktop and fewer in smaller
+windows. Click anywhere on a card (or focus it and press Enter/Space) to read the full item.
+Drag the card's top strip onto another card to rearrange the board. Focus a card and use
+Alt + arrow keys for keyboard movement. The arrangement is stored locally and restored on
+reopening; arranged cards stay in place, with newly captured items following them. This moves
+cards within the grid, not files to other apps. Dropping outside the board cancels the move.
+Use Copy for text or images, choose one of six saved box colours, or keep an item pinned.
+More options contains editing, revision history and deletion. Editing a captured item creates
+a recovery copy without changing the original; notes can be edited in place. Save changes
+explicitly before closing. Escape or clicking outside closes the popup; unsaved edits prompt
+for confirmation. There is no logo, navigation, search bar or main-page button toolbar.
 The background still retains the first and roughly 32 recent revisions and creates backups.
 Images preserve PNG pixels, not filenames or animations.
 

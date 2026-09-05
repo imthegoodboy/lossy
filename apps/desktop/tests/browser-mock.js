@@ -112,7 +112,16 @@
         case "color":
           item.color = r.color;
           persist();
-          return {...item};
+          return { ...item };
+        case "reorder": {
+          const positions = new Map(r.ids.map((id, i) => [id, i]));
+          items.sort(
+            (a, b) =>
+              (positions.get(a.id) ?? 10000) - (positions.get(b.id) ?? 10000),
+          );
+          persist();
+          return true;
+        }
         case "settings":
           prefs = r.prefs;
           return true;

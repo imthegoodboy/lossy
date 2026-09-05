@@ -1,55 +1,143 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type DragEvent,
+} from "react";
 import { createRoot } from "react-dom/client";
+import {
+  ArrowUpRight,
+  Check,
+  Copy,
+  DotsSixVertical,
+  Image as ImageIcon,
+  PushPin,
+  TextAlignLeft,
+  X,
+} from "@phosphor-icons/react";
 import { api, type Item, type Status } from "./api";
 import "./style.css";
+
+function shortTime(value: number) {
+  const date = new Date(value);
+  return date.toDateString() === new Date().toDateString()
+    ? date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+    : date.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+function ItemGlyph({ kind }: { kind: string }) {
+  const Glyph =
+    kind === "image" ? ImageIcon : kind === "clipboard" ? Copy : TextAlignLeft;
+  return <Glyph size={16} weight="regular" aria-hidden="true" />;
+}
 
 function SavedItem({
   item,
   onOpen,
+  dragging,
+  dropTarget,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDrop,
+  onMoveKey,
 }: {
   item: Item;
   onOpen: (item: Item) => void;
+  dragging: boolean;
+  dropTarget: boolean;
+  onDragStart: (event: DragEvent, id: string) => void;
+  onDragEnd: () => void;
+  onDragOver: (event: DragEvent, id: string) => void;
+  onDrop: (event: DragEvent, id: string) => void;
+  onMoveKey: (id: string, key: string) => void;
 }) {
   return (
     <article
-      className={`card tone-${item.color || "paper"}`}
+      className={`card tone-${item.color || "paper"}${dragging ? " dragging" : ""}${dropTarget ? " drop-target" : ""}`}
+      data-card-id={item.id}
       role="button"
       tabIndex={0}
       aria-haspopup="dialog"
       aria-label={`Open ${item.heading || "Saved item"}`}
+      aria-describedby="arrange-help"
+      onDragOver={(event) => onDragOver(event, item.id)}
+      onDrop={(event) => onDrop(event, item.id)}
       onClick={() => {
         if (!window.getSelection()?.toString()) onOpen(item);
       }}
       onKeyDown={(event) => {
+        if (
+          event.altKey &&
+          ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(
+            event.key,
+          )
+        ) {
+          event.preventDefault();
+          onMoveKey(item.id, event.key);
+          return;
+        }
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
           onOpen(item);
         }
       }}
     >
-      <header>
-        <span>{item.source}</span>
-        <time dateTime={new Date(item.updated).toISOString()}>
-          {new Date(item.updated).toLocaleString()}
-        </time>
-      </header>
-      <h2>
+      <header
+        draggable
+        onDragStart={(event) => onDragStart(event, item.id)}
+        onDragEnd={onDragEnd}
+        title="Drag to rearrange. Or focus this card and use Alt + arrow keys."
+      >
+        <DotsSixVertical className="drag-grip" size={15} aria-hidden="true" />
+        <span className="card-source" title={item.source}>
+          <ItemGlyph kind={item.kind} />
+          <span>{item.source}</span>
+        </span>
         {item.pinned && (
-          <span className="pin-mark" aria-label="Pinned">
-            ◆{" "}
-          </span>
+          <PushPin
+            className="pin-mark"
+            size={15}
+            weight="fill"
+            aria-label="Pinned"
+          />
         )}
-        {item.heading || (item.kind === "image" ? "Copied image" : "Untitled")}
-      </h2>
-      {item.kind === "image" ? (
-        <img
-          className="preview-image"
-          src={`data:image/png;base64,${item.text}`}
-          alt={item.heading || "Saved clipboard image"}
-        />
-      ) : (
-        <p className="saved-text preview-text">{item.text}</p>
-      )}
+      </header>
+      <div className="card-body">
+        <h2>
+          {item.heading ||
+            (item.kind === "image" ? "Copied image" : "Untitled")}
+        </h2>
+        {item.kind === "image" ? (
+          <img
+            draggable={false}
+            className="preview-image"
+            src={`data:image/png;base64,${item.text}`}
+            alt={item.heading || "Saved clipboard image"}
+          />
+        ) : (
+          <p className="saved-text preview-text">{item.text}</p>
+        )}
+      </div>
+      <footer className="card-footer">
+        <time
+          dateTime={new Date(item.updated).toISOString()}
+          title={new Date(item.updated).toLocaleString()}
+        >
+          {shortTime(item.updated)}
+        </time>
+        <span className="card-kind">
+          {item.kind === "image"
+            ? "Image"
+            : item.kind === "note"
+              ? "Note"
+              : item.kind === "clipboard"
+                ? "Clipboard"
+                : "Draft"}
+        </span>
+        <ArrowUpRight className="open-hint" size={15} aria-hidden="true" />
+      </footer>
     </article>
   );
 }
@@ -199,6 +287,7 @@ function FullItem({
   return (
     <dialog
       ref={dialog}
+      className={`tone-${full?.color || item.color || "paper"}`}
       aria-labelledby="full-heading"
       onCancel={(event) => {
         event.preventDefault();
@@ -219,13 +308,16 @@ function FullItem({
     >
       <div className="popup-heading">
         <div>
-          <p className="source">{item.source}</p>
+          <p className="source">
+            <ItemGlyph kind={full?.kind || item.kind} />
+            {full?.source || item.source}
+          </p>
           <h2 id="full-heading">
             {full?.heading || item.heading || "Saved item"}
           </h2>
         </div>
         <button className="close" aria-label="Close popup" onClick={close}>
-          ×
+          <X size={19} />
         </button>
       </div>
       <div className="popup-content">
@@ -241,6 +333,7 @@ function FullItem({
                 Heading
                 <input
                   value={heading}
+                  disabled={saving}
                   maxLength={120}
                   onChange={(e) => setHeading(e.target.value)}
                 />
@@ -249,6 +342,7 @@ function FullItem({
                 Text
                 <textarea
                   value={text}
+                  disabled={saving}
                   onChange={(e) => setText(e.target.value)}
                 />
               </label>
@@ -284,7 +378,12 @@ function FullItem({
             )}
           </fieldset>
           <label className="pin-option">
-            <input type="checkbox" checked={full.pinned} onChange={pin} />
+            <input
+              type="checkbox"
+              checked={full.pinned}
+              disabled={saving}
+              onChange={pin}
+            />
             Keep pinned
           </label>
         </div>
@@ -307,6 +406,7 @@ function FullItem({
                   {editing ? "Stop editing" : "Edit text"}
                 </button>
                 <button
+                  disabled={dirty || saving}
                   onClick={() => {
                     setHistory(!history);
                     setRevision(full.revision);
@@ -384,6 +484,7 @@ function FullItem({
           </button>
         ) : (
           <button className="copy" disabled={!full || copying} onClick={copy}>
+            {copied ? <Check size={17} /> : <Copy size={17} />}
             {copying ? "Copying…" : copied ? "Copy again" : "Copy"}
           </button>
         )}
@@ -401,11 +502,20 @@ function App() {
   const [starting, setStarting] = useState(false);
   const [pageCount, setPageCount] = useState(1);
   const [selected, setSelected] = useState<Item | null>(null);
+  const [dragged, setDragged] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const [arrangementNotice, setArrangementNotice] = useState("");
+  const dragId = useRef<string | null>(null);
+  const arranging = useRef(false);
+  const interactionVersion = useRef(0);
+  const suppressClickUntil = useRef(0);
+  const matrix = useRef<HTMLElement>(null);
   const sentinel = useRef<HTMLDivElement>(null);
   const busy = useRef(false);
   const refresh = useCallback(async () => {
-    if (busy.current) return;
+    if (busy.current || dragId.current || arranging.current) return;
     busy.current = true;
+    const version = interactionVersion.current;
     try {
       const state = await api<Status>({ op: "status" });
       setStatus(state);
@@ -422,6 +532,7 @@ function App() {
           hasMore = batch.more;
           if (!hasMore) break;
         }
+        if (version !== interactionVersion.current) return;
         setItems([
           ...new Map(collected.map((item) => [item.id, item])).values(),
         ]);
@@ -448,6 +559,53 @@ function App() {
     if (sentinel.current) observer.observe(sentinel.current);
     return () => observer.disconnect();
   }, [more, items.length]);
+  function endDrag() {
+    dragId.current = null;
+    setDragged(null);
+    setDropTarget(null);
+    suppressClickUntil.current = Date.now() + 350;
+  }
+  async function moveCard(id: string, target: string) {
+    if (arranging.current || id === target) return;
+    const from = items.findIndex((item) => item.id === id);
+    const to = items.findIndex((item) => item.id === target);
+    if (from < 0 || to < 0) return;
+    const previous = items;
+    const next = [...items];
+    next.splice(to, 0, next.splice(from, 1)[0]);
+    arranging.current = true;
+    interactionVersion.current++;
+    setItems(next);
+    setArrangementNotice("Saving arrangement…");
+    try {
+      await api({ op: "reorder", ids: next.map((item) => item.id) });
+      setArrangementNotice(`Moved to position ${to + 1}. Arrangement saved.`);
+    } catch (e) {
+      setItems(previous);
+      setArrangementNotice("");
+      setError(
+        `Could not save arrangement. Previous order restored. ${String(e)}`,
+      );
+    } finally {
+      arranging.current = false;
+    }
+  }
+  function moveWithKeys(id: string, key: string) {
+    if (!matrix.current) return;
+    const columns = getComputedStyle(matrix.current).gridTemplateColumns.split(
+      " ",
+    ).length;
+    const offset =
+      key === "ArrowLeft"
+        ? -1
+        : key === "ArrowRight"
+          ? 1
+          : key === "ArrowUp"
+            ? -columns
+            : columns;
+    const target = items[items.findIndex((item) => item.id === id) + offset];
+    if (target) void moveCard(id, target.id);
+  }
   async function enable() {
     if (!status || starting) return;
     setStarting(true);
@@ -468,7 +626,21 @@ function App() {
     }
   }
   return (
-    <main aria-label="Saved text and images">
+    <main
+      aria-label="Saved text and images"
+      onDragOver={(event) => event.preventDefault()}
+      onDrop={(event) => event.preventDefault()}
+    >
+      <header className="archive-heading">
+        <h1>
+          Saved for later
+          <span className="item-count">
+            {" "}
+            {ready ? `${items.length}${more ? "+" : ""}` : ""}
+          </span>
+        </h1>
+        <p>Just on this device</p>
+      </header>
       {status && !status.prefs.enabled && !status.error && (
         <label className="consent">
           <input
@@ -491,15 +663,83 @@ function App() {
       {status?.prefs.paused && (
         <p className="notice">Saving is paused. Resume from the system tray.</p>
       )}
-      {!ready && !error && <p className="empty">Loading saved items…</p>}
-      {ready && items.length === 0 && (
-        <p className="empty">Saved text and images will appear here.</p>
+      {!ready && !error && (
+        <section
+          className="matrix loading"
+          aria-label="Loading saved items"
+          aria-busy="true"
+        >
+          {[0, 1, 2, 3].map((i) => (
+            <div className="card skeleton" key={i}>
+              <span />
+              <span />
+              <span />
+            </div>
+          ))}
+        </section>
       )}
-      <section className="matrix" aria-label="Saved items">
+      {ready && items.length === 0 && (
+        <div className="empty">
+          <TextAlignLeft size={32} weight="light" aria-hidden="true" />
+          <h2>A place for your unfinished thoughts.</h2>
+          <p>
+            Text and images from supported apps will appear here.
+            <br />
+            Click any saved item to pick up where you left off.
+          </p>
+        </div>
+      )}
+      <section ref={matrix} className="matrix" aria-label="Saved items">
         {items.map((item) => (
-          <SavedItem key={item.id} item={item} onOpen={setSelected} />
+          <SavedItem
+            key={item.id}
+            item={item}
+            onOpen={(value) => {
+              if (!dragId.current && Date.now() > suppressClickUntil.current)
+                setSelected(value);
+            }}
+            dragging={dragged === item.id}
+            dropTarget={dropTarget === item.id && dragged !== item.id}
+            onDragStart={(event, id) => {
+              if (arranging.current) {
+                event.preventDefault();
+                return;
+              }
+              event.dataTransfer.setData("application/x-lossy-card", id);
+              event.dataTransfer.effectAllowed = "move";
+              const card = event.currentTarget.closest("article");
+              if (card) event.dataTransfer.setDragImage(card, 28, 22);
+              interactionVersion.current++;
+              dragId.current = id;
+              setDragged(id);
+              setArrangementNotice("");
+            }}
+            onDragEnd={endDrag}
+            onDragOver={(event, id) => {
+              if (!dragId.current) return;
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "move";
+              setDropTarget(id);
+            }}
+            onDrop={(event, id) => {
+              event.preventDefault();
+              const from = dragId.current;
+              endDrag();
+              if (from) void moveCard(from, id);
+            }}
+            onMoveKey={moveWithKeys}
+          />
         ))}
       </section>
+      {items.length > 1 && (
+        <p className="arrange-help" id="arrange-help">
+          Drag a card’s top edge to rearrange.{" "}
+          <span>Alt + arrow keys works too.</span>
+        </p>
+      )}
+      <p className="sr-only" role="status">
+        {arrangementNotice}
+      </p>
       <div ref={sentinel} className="sentinel" aria-hidden="true" />
       {selected && (
         <FullItem

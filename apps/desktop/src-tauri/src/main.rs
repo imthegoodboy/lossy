@@ -180,6 +180,8 @@ fn main() {
                     tauri::WebviewUrl::App("index.html".into()),
                 )
                 .title("Lossy")
+                // Let WebView2 deliver HTML drag events for card rearrangement.
+                .disable_drag_drop_handler()
                 .inner_size(1120.0, 780.0)
                 .min_inner_size(760.0, 540.0)
                 .build()?;
