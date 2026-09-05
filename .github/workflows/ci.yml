@@ -61,6 +61,12 @@ jobs:
           CARGO_BUILD_JOBS: 2
         run: npm run tauri -- build
 
+      - name: Verify installed app and Windows shortcuts
+        run: |
+          $installer = (Get-ChildItem target/release/bundle/nsis/*.exe | Select-Object -First 1).FullName
+          ./scripts/verify-install.ps1 -Installer $installer
+          ./scripts/smoke-installed.ps1
+
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:

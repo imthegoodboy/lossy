@@ -94,17 +94,22 @@ try {
         if(!$hostProcess.WaitForExit(3000)) { $hostProcess.Kill() }
     } finally { if(!$hostProcess.HasExited) {$hostProcess.Kill()}; $hostProcess.Dispose() }
     if($Interactive) {
-        $prefs.allowed_apps=@('pwsh.exe'); $prefs.clipboard=$true
+        $fixtureExecutable = Join-Path $testDirectory 'lossy-synthetic-editor.exe'
+        $compiler = Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
+        & $compiler /nologo /target:winexe "/out:$fixtureExecutable" /reference:System.Windows.Forms.dll /reference:System.Drawing.dll (Join-Path $PSScriptRoot 'synthetic-editor.cs')
+        if($LASTEXITCODE -ne 0) { throw 'Could not compile the isolated editor fixture' }
+        $prefs.allowed_apps=@('lossy-synthetic-editor.exe'); $prefs.clipboard=$true
         $null = Request-Lossy @{op='settings';prefs=$prefs}
-        $fixtureScript = Join-Path $PSScriptRoot 'synthetic-editor.ps1'
-        $fixture = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList '-NoProfile','-STA','-File',('"'+$fixtureScript+'"') -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $testDirectory 'fixture-output.txt') -RedirectStandardError (Join-Path $testDirectory 'fixture-error.txt')
-        try { if(!$fixture.WaitForExit(15000)) { throw 'Synthetic editor timed out' } }
+        $fixture = Start-Process -FilePath $fixtureExecutable -WindowStyle Normal -PassThru -RedirectStandardOutput (Join-Path $testDirectory 'fixture-output.txt') -RedirectStandardError (Join-Path $testDirectory 'fixture-error.txt')
+        try { if(!$fixture.WaitForExit(30000)) { throw 'Synthetic editor timed out' } }
         finally { if(!$fixture.HasExited) {$fixture.Kill()};$fixture.Dispose() }
         $prefs.allowed_apps=@();$prefs.clipboard=$false
         $null = Request-Lossy @{op='settings';prefs=$prefs}
         $archive = (Request-Lossy @{op='list'}).items
         Get-Content (Join-Path $testDirectory 'fixture-output.txt'),(Join-Path $testDirectory 'fixture-error.txt')
+        (Request-Lossy @{op='status'}).clipboard_status | Format-List
         $archive | Select-Object kind,source | Format-Table
+        if($archive | Where-Object { $_.text -like '*Synthetic protected field*' }) { throw 'Protected field was captured' }
         if(!($archive | Where-Object {$_.kind -eq 'draft' -and $_.text -eq 'Synthetic native draft continued'})) { throw 'Native UIA capture failed' }
         if(!($archive | Where-Object {$_.kind -eq 'clipboard' -and $_.text -eq 'Synthetic clipboard text'})) { throw 'Clipboard text capture failed' }
         $picture = $archive | Where-Object kind -eq 'image' | Select-Object -First 1

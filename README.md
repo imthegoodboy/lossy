@@ -9,7 +9,7 @@
 A local draft-recovery and clipboard app for Windows.
 Save supported unfinished text, keep conversations separate, and pick up where you left off.
 
-[**Download for Windows**](https://github.com/imthegoodboy/lossy/releases/latest) · [Getting started](docs/user-guide.md) · [Browser companion](docs/browser-companion.md)
+[**Release status — review needed**](https://github.com/imthegoodboy/lossy/releases/latest) · [Getting started](docs/user-guide.md) · [Browser companion](docs/browser-companion.md)
 
 ![Windows 10 and 11 x64](https://img.shields.io/badge/Windows-10%20%2F%2011%20x64-994b69?style=flat-square)
 ![Local storage](https://img.shields.io/badge/storage-local%20%26%20encrypted-994b69?style=flat-square)
@@ -63,19 +63,28 @@ Drag the top edge of a card to rearrange the grid. Keyboard users can focus a ca
 **Alt + arrow keys** to move it, **Enter** to open it, and **Escape** to close the popup.
 Popup edits require explicit saving; closing with unsaved edits asks for confirmation.
 
-## Install in a few minutes
+## Download status: security review needed
 
-1. Download `Lossy_0.1.0_x64-setup.exe` from the [latest release](https://github.com/imthegoodboy/lossy/releases/latest).
-2. Run the installer and open **Lossy** from the Start menu. Installation is per-user.
+Windows Defender detected the installed **v0.1.0** executable as
+`Trojan:Win32/Bearfoos.A!ml` on a maintainer's Windows system and removed the executable,
+shortcuts and Windows app registrations. Whether this is a false positive is **not yet resolved**.
+Do not bypass Defender or restore the detected executable to use this release. A later file-only
+scan of the installer reported no threats; that does not clear the installed-app detection.
+The next release remains on hold pending investigation and Microsoft review.
+
+## Installation steps (after the release hold is cleared)
+
+1. Download the `Lossy_*_x64-setup.exe` asset from the [latest release](https://github.com/imthegoodboy/lossy/releases/latest).
+2. Run the installer through **Install → Finish**, leaving **Create desktop shortcut** selected. Choosing a destination folder alone does not install the app. Open **Lossy** from your desktop or Start menu. Installation is per-user.
 3. Read and accept the inline capture permission. This enables supported capture and quiet sign-in startup.
-4. Try a harmless sentence in **Notepad**, then open Lossy and check that it appears.
+4. Open **Capture setup** to choose desktop apps, or explicitly opt into all supported desktop apps. Try a harmless sentence in **Notepad**, then open Lossy and check the last-save time and the saved card.
 5. For websites, follow the [Chrome/Edge companion setup](docs/browser-companion.md) and enable only the sites you choose.
 
 Closing the archive leaves the tray agent running. Right-click the tray icon to pause saving,
 open Lossy, set up the browser companion, or quit. Capture does not start before you give permission.
 
 > [!NOTE]
-> This first release is unsigned. Windows may show an unknown-publisher or SmartScreen warning.
+> This release is unsigned. Windows may show an unknown-publisher or SmartScreen warning.
 > Download only from this repository's releases, and compare the installer's SHA-256 with
 > `SHA256SUMS.txt` if you want to verify the download. A checksum verifies the file, not publisher identity.
 
@@ -86,10 +95,10 @@ WebView2 if it is missing; that setup step may require internet access. Lossy's 
 
 | Source | Current support |
 | --- | --- |
-| Notepad and accessible desktop Edit fields | Native capture from an explicit app allowlist |
+| Notepad and accessible desktop Edit fields | Selected apps, or optional broader desktop capture |
 | Standard Chrome/Edge text boxes | Per-site opt-in through the unpacked browser companion |
 | WhatsApp Web drafts | Best-effort isolation; a return to a chat may make a new card when stable identity is unavailable |
-| Cursor / VS Code | Depends on accessible editable fields; not every panel is supported |
+| Orca / Claude / Cursor / VS Code | Best effort: accessible Edit fields only; same-executable renderer processes supported, embedded terminals and custom editors may not work |
 | Copied desktop text and images | Allowed apps only; PNG bitmap recovery, including supported Paint / Snipping Tool copies |
 | Password fields, private browser windows, known password managers | Excluded |
 | WhatsApp Desktop, terminals, elevated or inaccessible editors | Not reliably supported |
@@ -97,6 +106,18 @@ WebView2 if it is missing; that setup step may require internet access. Lossy's 
 Lossy does **not** scrape message history, capture browser clipboard images, or guarantee
 that every application exposes its drafts. See the [compatibility and recovery guide](docs/user-guide.md)
 before relying on it for important work.
+
+**Nothing appearing?** Expand **Capture setup**. It shows whether saving is off/paused,
+the last committed save in this session, and the most recently checked desktop field with
+an exclusion or unsupported-field reason. Seeing “enabled” alone is not proof a field was captured.
+Existing installations keep their selected-app list; add `orca.exe` or other desired executables there.
+Broader capture includes future desktop apps and can save sensitive text in ordinary fields;
+known exclusions are not a complete classification of every application.
+
+**Missing after installation?** Check that setup reached Finish, then look for
+`%LOCALAPPDATA%\Programs\Lossy\lossy.exe`. After the detection is resolved, rerun the current installer to repair files and shortcuts;
+do not delete `%LOCALAPPDATA%\Lossy` (your encrypted archive). If the executable disappears again,
+check Windows Security's Protection history or your security software; do not disable protection.
 
 ## Your words stay on your device
 
