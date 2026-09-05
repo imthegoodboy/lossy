@@ -281,7 +281,8 @@ fn active_context_retention_preferences_and_compaction() {
     drop(s);
     for entry in std::fs::read_dir(dir.path()).unwrap() {
         let bytes = std::fs::read(entry.unwrap().path()).unwrap();
-        assert!(!bytes.windows(24).any(|w| w == b"Synthetic private setting"));
+        let secret = b"Synthetic private setting";
+        assert!(!bytes.windows(secret.len()).any(|w| w == secret));
     }
 }
 

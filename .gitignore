@@ -1,5 +1,8 @@
 # Rust
 /target/
+/output/
+/.playwright-cli/
+apps/desktop/src-tauri/gen/
 **/*.rs.bk
 
 # Node and frontend builds
