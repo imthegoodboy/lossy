@@ -1,0 +1,3 @@
+# Chrome extension's public RSA identity key, not a private key or API credential.
+# Verified as DER SubjectPublicKeyInfo; required to keep the unpacked extension ID stable.
+9f6a327c339c89636157001d4cce87dc27e26fa5:integrations/browser/manifest.json:generic-api-key:4
