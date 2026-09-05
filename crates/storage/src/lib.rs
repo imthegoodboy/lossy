@@ -208,15 +208,18 @@ impl Store {
     }
 
     pub fn latest(&self, id: ItemId) -> Result<SavedDraft> {
-        let revision = self
+        let (revision, maximum): (i64, Option<i64>) = self
             .connection
             .query_row(
-                "SELECT current_revision FROM drafts WHERE id=?1",
+                "SELECT current_revision, (SELECT MAX(revision) FROM revisions WHERE draft_id=drafts.id) FROM drafts WHERE id=?1",
                 [id.0.as_slice()],
-                |r| r.get(0),
+                |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()?
             .ok_or(StoreError::NotFound)?;
+        if Some(revision) != maximum {
+            return Err(StoreError::Corrupt);
+        }
         self.revision(id, revision)
     }
 
@@ -263,19 +266,31 @@ impl Store {
     /// Explicit verified snapshot. Refuses to overwrite an existing backup.
     pub fn backup(&self, destination: impl AsRef<Path>) -> Result<()> {
         let destination = destination.as_ref();
-        let reservation = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(destination)
-            .map_err(|_| StoreError::Database)?;
-        drop(reservation);
-        let mut backup =
-            Connection::open_with_flags(destination, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+        let parent = destination
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        // Only publish a verified copy. TempPath cleans up our own staging file on failure;
+        // persist_noclobber refuses to replace any existing user-owned destination.
+        let staging = tempfile::NamedTempFile::new_in(parent)
+            .map_err(|_| StoreError::Database)?
+            .into_temp_path();
+        let mut backup = Connection::open_with_flags(&staging, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
         let job = rusqlite::backup::Backup::new(&self.connection, &mut backup)?;
         job.run_to_completion(128, Duration::from_millis(1), None)?;
         drop(job);
         drop(backup);
-        Self::open(destination)?.verify_integrity()
+        Self::open(&staging)?.verify_integrity()?;
+        std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&staging)
+            .and_then(|file| file.sync_all())
+            .map_err(|_| StoreError::Database)?;
+        staging
+            .persist_noclobber(destination)
+            .map_err(|_| StoreError::Database)?;
+        Ok(())
     }
 
     /// SQLite integrity plus authenticated reads of all checkpoints. Run at open/backup,
@@ -307,7 +322,7 @@ impl Store {
                 revision,
             )?;
         }
-        let missing: i64 = self.connection.query_row("SELECT count(*) FROM drafts d WHERE NOT EXISTS (SELECT 1 FROM revisions r WHERE r.draft_id=d.id AND r.revision=d.current_revision)", [], |r| r.get(0))?;
+        let missing: i64 = self.connection.query_row("SELECT count(*) FROM drafts d WHERE d.current_revision IS NOT (SELECT MAX(r.revision) FROM revisions r WHERE r.draft_id=d.id)", [], |r| r.get(0))?;
         if missing != 0 {
             return Err(StoreError::Corrupt);
         }

@@ -184,6 +184,57 @@ fn unknown_existing_database_is_not_initialized_or_erased() {
 }
 
 #[test]
+fn revision_pointer_rollback_is_detected_during_reads_and_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("lossy.db");
+    let mut store = Store::open(&path).unwrap();
+    let first = store
+        .create([1; 32], &sample("Older synthetic message"))
+        .unwrap();
+    store
+        .update(first.id, 1, &sample("Newer synthetic message"))
+        .unwrap();
+    Connection::open(&path)
+        .unwrap()
+        .execute("UPDATE drafts SET current_revision=1", [])
+        .unwrap();
+    assert_eq!(store.latest(first.id), Err(StoreError::Corrupt));
+    assert_eq!(store.verify_integrity(), Err(StoreError::Corrupt));
+    drop(store);
+    assert!(matches!(Store::open(&path), Err(StoreError::Corrupt)));
+}
+
+#[test]
+fn failed_backup_is_not_published_and_retry_can_succeed() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("lossy.db");
+    let destination = dir.path().join("backup.db");
+    let mut store = Store::open(&path).unwrap();
+    store
+        .create([1; 32], &sample("Synthetic backup failure"))
+        .unwrap();
+    let conn = Connection::open(&path).unwrap();
+    let original: Vec<u8> = conn
+        .query_row("SELECT payload FROM revisions", [], |r| r.get(0))
+        .unwrap();
+    conn.execute("UPDATE revisions SET payload=zeroblob(40)", [])
+        .unwrap();
+    assert_eq!(store.backup(&destination), Err(StoreError::Authentication));
+    assert!(!destination.exists());
+    conn.execute("UPDATE revisions SET payload=?1", [original])
+        .unwrap();
+    store.backup(&destination).unwrap();
+    assert_eq!(
+        Store::open(&destination)
+            .unwrap()
+            .list(20, 0)
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
 fn payload_limits_and_debug_redaction() {
     let dir = tempfile::tempdir().unwrap();
     let mut store = Store::open(dir.path().join("lossy.db")).unwrap();

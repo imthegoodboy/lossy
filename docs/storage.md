@@ -29,7 +29,9 @@ Context keys supplied by callers must already be derived by `lossy-capture-core`
 - Updating requires the version the caller loaded. A stale edit returns `Conflict`.
 - Updating the current revision pointer and inserting the checkpoint share one transaction.
 - Deleting requires the current version and removes dependent revisions using a foreign key.
-- Explicit backups refuse to overwrite a destination and are reopened and verified.
+- Explicit backups are staged, reopened, verified, and published without overwriting a destination.
+  Failed verification cleans up the staging file so the requested destination remains retryable.
+- Reads and integrity checks reject a current-revision pointer rolled back below the latest checkpoint.
 - Corrupt storage never triggers deletion or silent fallback to an older backup.
 
 Full checkpoints deliberately keep the first implementation easy to recover. Delta compaction,
