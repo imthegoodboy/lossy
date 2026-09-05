@@ -195,6 +195,7 @@ pub struct ContextEngine {
     drafts: HashMap<ContextKey, Vec<DraftSnapshot>>,
     next_draft_id: u64,
     last_sequence: Option<EventSequence>,
+    last_focus_epoch: Option<FocusEpoch>,
 }
 
 impl Default for ContextEngine {
@@ -204,6 +205,7 @@ impl Default for ContextEngine {
             drafts: HashMap::new(),
             next_draft_id: 1,
             last_sequence: None,
+            last_focus_epoch: None,
         }
     }
 }
@@ -263,6 +265,16 @@ impl ContextEngine {
             return Vec::new();
         }
 
+        // Arrival sequence alone cannot make an old focus callback authoritative again.
+        // Keep this watermark across pauses so queued callbacks cannot resume capture.
+        if self
+            .last_focus_epoch
+            .is_some_and(|last| focus_epoch <= last)
+        {
+            return vec![EngineAction::Ignored(IgnoreReason::StaleFocus)];
+        }
+        self.last_focus_epoch = Some(focus_epoch);
+
         let mut actions = self.suspend_active();
         self.active = Some(target);
 
@@ -291,13 +303,27 @@ impl ContextEngine {
                 return Vec::new();
             };
 
-            if draft.status.is_terminal() || draft.editor_is_empty {
+            if draft.editor_is_empty {
                 return Vec::new();
+            }
+
+            if draft.status == DraftStatus::Completed {
+                draft.editor_is_empty = true;
+                return vec![EngineAction::DraftUpdated(draft.clone())];
             }
 
             draft.status = DraftStatus::Cleared;
             draft.editor_is_empty = true;
             return vec![EngineAction::DraftCleared(draft.clone())];
+        }
+
+        if self.latest(context).is_some_and(|draft| {
+            draft.status == DraftStatus::Completed
+                && !draft.editor_is_empty
+                && draft.recoverable_content == content
+        }) {
+            // Some editors report the submitted value again before they report clearing it.
+            return Vec::new();
         }
 
         let needs_new_generation = self
@@ -554,5 +580,51 @@ mod tests {
         let action_debug = format!("{:?}", actions[0]);
         assert!(!action_debug.contains("another private draft"));
         assert!(action_debug.contains("[redacted]"));
+    }
+
+    #[test]
+    fn delayed_focus_cannot_reactivate_an_old_chat_or_resume_after_pause() {
+        let a = context("user-a");
+        let b = context("user-b");
+        let mut engine = ContextEngine::new();
+        engine.handle(focus(1, a, 1));
+        engine.handle(text(2, a, 1, "A draft"));
+        engine.handle(focus(3, b, 2));
+        assert_eq!(
+            engine.handle(focus(4, a, 1)),
+            vec![EngineAction::Ignored(IgnoreReason::StaleFocus)]
+        );
+        assert_eq!(engine.active_context(), Some(b));
+        engine.handle(SessionEvent::CapturePaused { sequence: 5 });
+        assert_eq!(
+            engine.handle(focus(6, b, 2)),
+            vec![EngineAction::Ignored(IgnoreReason::StaleFocus)]
+        );
+        assert_eq!(engine.active_context(), None);
+        engine.handle(focus(7, b, 3));
+        assert_eq!(engine.active_context(), Some(b));
+    }
+
+    #[test]
+    fn duplicate_sent_value_is_ignored_but_identical_new_message_is_preserved() {
+        let a = context("user-a");
+        let mut engine = ContextEngine::new();
+        engine.handle(focus(1, a, 1));
+        engine.handle(text(2, a, 1, "Same synthetic message"));
+        engine.handle(SessionEvent::Submitted {
+            sequence: 3,
+            context: a,
+            focus_epoch: 1,
+        });
+        assert!(
+            engine
+                .handle(text(4, a, 1, "Same synthetic message"))
+                .is_empty()
+        );
+        assert_eq!(engine.drafts_for(a).len(), 1);
+        engine.handle(text(5, a, 1, ""));
+        engine.handle(text(6, a, 1, "Same synthetic message"));
+        assert_eq!(engine.drafts_for(a).len(), 2);
+        assert_eq!(engine.drafts_for(a)[1].generation(), 2);
     }
 }
