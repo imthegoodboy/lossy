@@ -1,0 +1,27 @@
+[package]
+name = "lossy-storage"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+aes-gcm.workspace = true
+blake3.workspace = true
+getrandom.workspace = true
+rusqlite = { workspace = true, features = ["backup"] }
+zeroize.workspace = true
+tempfile = "3.23.0"
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Security_Cryptography",
+    "Win32_System_Memory",
+] }
+
+# DPAPI requires a small audited FFI boundary. All other storage code denies unsafe.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = "warn"

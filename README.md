@@ -23,7 +23,9 @@ The first release targets Windows 10/11 x64.
 
 ## Development
 
-The initial workspace contains the privacy-safe capture types and draft context state machine.
+The workspace contains the capture-context types, draft state machine, and Windows-protected
+encrypted revision store. It does not yet include a desktop window or enable background capture.
+Rust 1.88 or later and the Windows MSVC build tools are required.
 
 ```powershell
 cargo fmt --all -- --check
@@ -32,6 +34,9 @@ cargo test --workspace --locked
 ```
 
 Implementation changes are developed on focused branches and merged through pull requests.
+
+The [storage design and verification notes](docs/storage.md) describe the current persistence
+boundary, failure behavior, and tests. Runtime drafts and databases must never be committed.
 
 ## Security
 
