@@ -1,7 +1,7 @@
 # Chrome/Edge companion
 
-1. Install Lossy in a stable location and complete preferences.
-2. Click **Preferences → Set up browser companion**. This registers the current-user native
+1. Install Lossy in a stable location and accept the one-time capture permission.
+2. Right-click Lossy in the system tray and choose **Set up browser companion**. This registers the current-user native
    messaging host and opens the bundled `browser` folder.
 3. Open `chrome://extensions` or `edge://extensions`, enable **Developer mode**, choose
    **Load unpacked**, and select that folder. Expected ID: `bbebeppoampdkokfpfiihnldhhjegoej`.

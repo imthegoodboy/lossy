@@ -16,6 +16,11 @@ One executable has separate UI and agent processes. Closing the archive cannot s
 The tray agent creates no webview. UIA, clipboard, IPC and writer have separate threads. Capture
 requires onboarding and source allowlists; there are no keyboard hooks, elevated service or telemetry.
 
+The current UI is intentionally only a single scrollable archive with selectable full content.
+No logo, navigation, action buttons, search, editing or popup features. The existing backend
+commands remain for migration compatibility and regression tests; they are not page controls.
+The first-run inline consent checkbox enables supported capture and silent sign-in startup.
+
 Context hashes use a per-install keyed BLAKE3 secret. Schema v2 adds encrypted preferences,
 kind/pin metadata and a unique active draft per context. Creation and ownership commit together;
 an empty snapshot finishes ownership while retaining history. Restart resumes known contexts.

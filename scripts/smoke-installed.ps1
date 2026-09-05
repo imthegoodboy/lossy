@@ -1,5 +1,6 @@
 param([string]$Executable = "$env:LOCALAPPDATA\Programs\Lossy\lossy.exe", [switch]$Interactive)
 $ErrorActionPreference = 'Stop'
+Add-Type 'using System; using System.Text; using System.Runtime.InteropServices; public static class LossySmokeWindow { [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left,Top,Right,Bottom; } [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h,out Rect rect); [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr h,StringBuilder b,int size); }'
 if (Get-Process lossy -ErrorAction SilentlyContinue) { throw 'Quit Lossy before the isolated smoke test.' }
 $testDirectory = Join-Path ([IO.Path]::GetTempPath()) ('lossy-smoke-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $testDirectory | Out-Null
@@ -52,7 +53,14 @@ try {
     $a = $items | Where-Object text -eq 'Hello A continued'
     if(!$a -or $a.revision -ne 2) { throw 'Draft continuation failed' }
     $agent.Refresh()
-    if($agent.MainWindowHandle -ne 0) { throw 'Background agent opened a window' }
+    if($agent.MainWindowHandle -ne 0) {
+        $rect=[LossySmokeWindow+Rect]::new()
+        $null=[LossySmokeWindow]::GetWindowRect($agent.MainWindowHandle,[ref]$rect)
+        $className=[Text.StringBuilder]::new(256)
+        $null=[LossySmokeWindow]::GetClassName($agent.MainWindowHandle,$className,256)
+        # Tao owns a 14x14 event-target infrastructure window, not an archive webview.
+        if($className.ToString() -ne 'Tao Thread Event Target') { throw 'Background agent opened an unexpected window' }
+    }
 
     # Kill only this spawned process, then prove acknowledged data/context survives.
     $agent.Kill(); $agent.WaitForExit(); $agent.Dispose()
@@ -89,12 +97,14 @@ try {
         $prefs.allowed_apps=@('pwsh.exe'); $prefs.clipboard=$true
         $null = Request-Lossy @{op='settings';prefs=$prefs}
         $fixtureScript = Join-Path $PSScriptRoot 'synthetic-editor.ps1'
-        $fixture = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList '-NoProfile','-STA','-File',('"'+$fixtureScript+'"') -WindowStyle Hidden -PassThru
+        $fixture = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList '-NoProfile','-STA','-File',('"'+$fixtureScript+'"') -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $testDirectory 'fixture-output.txt') -RedirectStandardError (Join-Path $testDirectory 'fixture-error.txt')
         try { if(!$fixture.WaitForExit(15000)) { throw 'Synthetic editor timed out' } }
         finally { if(!$fixture.HasExited) {$fixture.Kill()};$fixture.Dispose() }
         $prefs.allowed_apps=@();$prefs.clipboard=$false
         $null = Request-Lossy @{op='settings';prefs=$prefs}
         $archive = (Request-Lossy @{op='list'}).items
+        Get-Content (Join-Path $testDirectory 'fixture-output.txt'),(Join-Path $testDirectory 'fixture-error.txt')
+        $archive | Select-Object kind,source | Format-Table
         if(!($archive | Where-Object {$_.kind -eq 'draft' -and $_.text -eq 'Synthetic native draft continued'})) { throw 'Native UIA capture failed' }
         if(!($archive | Where-Object {$_.kind -eq 'clipboard' -and $_.text -eq 'Synthetic clipboard text'})) { throw 'Clipboard text capture failed' }
         $picture = $archive | Where-Object kind -eq 'image' | Select-Object -First 1

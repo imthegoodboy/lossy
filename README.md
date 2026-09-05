@@ -4,8 +4,8 @@ Lossy is a Windows-first, fully local draft-recovery and smart-clipboard app. It
 
 ## Status
 
-The Windows app includes a pink searchable card archive, auto-saving notes and recovery copies,
-image viewing/copying, a windowless tray agent, opt-in native capture, encrypted persistence,
+The Windows app has a single plain page of saved text and images: no logo, navigation, search,
+action buttons or editor popups. It includes a windowless tray agent, opt-in native capture, encrypted persistence,
 retention, rotating backups and a Chrome/Edge companion. See the [user guide](docs/user-guide.md)
 for installation, supported sources, limits and recovery. This first release is unsigned.
 
@@ -44,7 +44,7 @@ Installer output is under `target/release/bundle/nsis`. For development, run `np
 from `apps/desktop`. Use `-j 1` for Cargo builds on low-memory machines.
 
 Download packaged builds from [Releases](https://github.com/imthegoodboy/lossy/releases).
-Complete the initial preferences to enable capture; then enable the
+Accept the one-time inline capture permission; then enable the
 [browser companion](docs/browser-companion.md) on selected websites.
 
 Native editors are sampled approximately every 35 ms and clipboard changes every 100 ms.

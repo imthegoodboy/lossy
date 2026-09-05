@@ -2,15 +2,15 @@
 
 Install the x64 installer from [Releases](https://github.com/imthegoodboy/lossy/releases). The
 initial build is unsigned; Windows may warn about an unknown publisher. Only install trusted builds.
-Complete the initial preferences, choose allowed executables, and test a synthetic Notepad draft.
-Enable **Start quietly with Windows** for tray-only startup at sign-in. Closing the archive
+Accept the single inline capture permission and test a synthetic Notepad draft.
+This enables tray-only startup at sign-in. Closing the archive
 leaves saving running. **Quit Lossy** in the tray stops saving until the next app start.
 
 ## Supported capture
 
 | Source | Behavior |
 | --- | --- |
-| Lossy notes | Auto-saving, revision-checked edits |
+| Archive page | Full saved text and images, selectable text, automatically loaded older items |
 | Native UI Automation Edit fields | Explicit app allowlist, process/window/editor identity |
 | Standard web text boxes | Opt-in [Chrome/Edge companion](browser-companion.md) |
 | WhatsApp Web | Best-effort isolation; uncertain chat switches make separate cards |
@@ -24,11 +24,11 @@ polling is about 35 ms; clipboard polling 100 ms. Neither guarantees every physi
 
 ## Archive
 
-Search, open a card, copy, pin or edit. Captured originals are preserved while edits autosave
-as separate My notes recovery copies. A version conflict never silently overwrites another
-window's changes. Retain the unsaved text and reconcile with a freshly opened version.
-The first and roughly 32 recent revisions remain; intermediate numbers may be compacted.
-Images can be viewed/copied, not edited. They preserve PNG pixels, not filenames or animations.
+Everything appears in one scrolling page. Select text and press Ctrl+C. Images can be copied
+through the WebView's native context menu. There are no page buttons, navigation, search,
+editing, pinning or popup controls. Existing notes and pinned items remain in storage.
+The background still retains the first and roughly 32 recent revisions and creates backups.
+Images preserve PNG pixels, not filenames or animations.
 
 Limits: native drafts 1 MiB; browser text 200,000 UTF-16 characters; images 16 million pixels
 and 6 MiB after base64 PNG encoding. Native clipboard defaults include Paint and Snipping Tool.
@@ -42,7 +42,7 @@ pin status are visible metadata. Same-user malware can access the archive. No cl
 
 Retention and three rotating verified backups run every 30 minutes. Pinned items do not expire.
 Deleting removes an active item, not immediately existing backups or forensic disk remnants.
-Preferences → Back up now creates a verified snapshot under the data folder's `backups` directory.
+Automatic snapshots are stored under the data folder's `backups` directory.
 These remain tied to your account's DPAPI keys, not portable to another account/computer by themselves.
 
 For manual restore, quit Lossy and preserve the **entire** data folder including any WAL/SHM
