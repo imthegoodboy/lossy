@@ -2,6 +2,7 @@
 members = [
     "crates/capture-core",
     "crates/context-engine",
+    "crates/storage",
 ]
 resolver = "3"
 
@@ -12,10 +13,14 @@ rust-version = "1.85"
 
 [workspace.dependencies]
 blake3 = "1.8.2"
+aes-gcm = { version = "0.11.1", features = ["zeroize"] }
+getrandom = "0.4.3"
+rusqlite = { version = "0.40.2", default-features = false, features = ["bundled"] }
+windows = "0.62.2"
+zeroize = "1.8.2"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
 
 [workspace.lints.clippy]
 all = "warn"
-
