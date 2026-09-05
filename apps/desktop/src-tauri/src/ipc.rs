@@ -114,6 +114,7 @@ mod tests {
             send(&mut stream, &value).unwrap();
         });
         let mut client = Stream::connect(name.to_ns_name::<GenericNamespaced>().unwrap()).unwrap();
+        client.set_nonblocking(true).unwrap();
         std::thread::sleep(Duration::from_millis(30));
         let bytes = br#"{"test":"synthetic"}"#;
         client
@@ -121,7 +122,6 @@ mod tests {
             .unwrap();
         std::thread::sleep(Duration::from_millis(30));
         client.write_all(bytes).unwrap();
-        client.set_nonblocking(true).unwrap();
         assert_eq!(receive(&mut client).unwrap()["test"], "synthetic");
         server.join().unwrap();
     }

@@ -119,13 +119,23 @@ fn main() {
                 let pause =
                     MenuItem::with_id(app, "pause", "Pause / resume saving", true, None::<&str>)?;
                 let quit = MenuItem::with_id(app, "quit", "Quit Lossy", true, None::<&str>)?;
-                let menu = Menu::with_items(app, &[&open, &pause, &quit])?;
+                let browser = MenuItem::with_id(
+                    app,
+                    "browser",
+                    "Set up browser companion",
+                    true,
+                    None::<&str>,
+                )?;
+                let menu = Menu::with_items(app, &[&open, &pause, &browser, &quit])?;
                 TrayIconBuilder::new()
                     .icon(app.default_window_icon().unwrap().clone())
                     .tooltip("Lossy · local draft recovery")
                     .menu(&menu)
                     .on_menu_event(move |app, event| match event.id.as_ref() {
                         "open" => platform::open_ui(),
+                        "browser" => {
+                            let _ = setup_browser(app.clone());
+                        }
                         "pause" => {
                             let tx = tx.clone();
                             std::thread::spawn(move || {
@@ -169,7 +179,7 @@ fn main() {
                     "main",
                     tauri::WebviewUrl::App("index.html".into()),
                 )
-                .title("Lossy · Your words, kept close")
+                .title("Lossy")
                 .inner_size(1120.0, 780.0)
                 .min_inner_size(760.0, 540.0)
                 .build()?;
