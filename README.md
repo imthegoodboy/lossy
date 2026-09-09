@@ -4,6 +4,8 @@
 
 # Lossy
 
+# status : need some fixes
+
 ### Keep the thought. Even when the window is gone.
 
 A local draft-recovery and clipboard app for Windows.
