@@ -8,7 +8,7 @@ use windows::Win32::{
         TokenUser,
     },
     System::{
-        DataExchange::GetClipboardSequenceNumber,
+        DataExchange::{GetClipboardOwner, GetClipboardSequenceNumber},
         StationsAndDesktops::{CloseDesktop, DESKTOP_READOBJECTS, OpenInputDesktop},
         Threading::{
             GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_NAME_WIN32,
@@ -53,18 +53,7 @@ pub fn foreground() -> Option<(u32, String, String)> {
         let hwnd = GetForegroundWindow();
         let mut pid = 0;
         GetWindowThreadProcessId(hwnd, Some(&mut pid));
-        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
-        let mut path = vec![0u16; 32768];
-        let mut length = path.len() as u32;
-        let ok = QueryFullProcessImageNameW(
-            process,
-            PROCESS_NAME_WIN32,
-            PWSTR(path.as_mut_ptr()),
-            &mut length,
-        );
-        let _ = CloseHandle(process);
-        ok.ok()?;
-        let path = String::from_utf16_lossy(&path[..length as usize]);
+        let path = process_path(pid)?;
         let exe = std::path::Path::new(&path)
             .file_name()?
             .to_string_lossy()
@@ -78,8 +67,49 @@ pub fn foreground() -> Option<(u32, String, String)> {
         ))
     }
 }
+
+fn process_path(pid: u32) -> Option<String> {
+    // SAFETY: the query buffer stays alive and the process handle is always closed.
+    unsafe {
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+        let mut path = vec![0u16; 32768];
+        let mut length = path.len() as u32;
+        let ok = QueryFullProcessImageNameW(
+            process,
+            PROCESS_NAME_WIN32,
+            PWSTR(path.as_mut_ptr()),
+            &mut length,
+        );
+        let _ = CloseHandle(process);
+        ok.ok()?;
+        Some(String::from_utf16_lossy(&path[..length as usize]))
+    }
+}
+pub fn same_application_process(foreground_pid: u32, element_pid: u32) -> bool {
+    if foreground_pid == 0 || element_pid == 0 {
+        return false;
+    }
+    if foreground_pid == element_pid {
+        return true;
+    }
+    // Electron accessibility can belong to a renderer. Require the same full
+    // executable path, not a basename match or just any focused process.
+    match (process_path(foreground_pid), process_path(element_pid)) {
+        (Some(a), Some(b)) => a.eq_ignore_ascii_case(&b),
+        _ => false,
+    }
+}
 pub fn clipboard_sequence() -> u32 {
     unsafe { GetClipboardSequenceNumber() }
+}
+pub fn clipboard_owner_pid() -> Option<u32> {
+    // SAFETY: Windows owns the returned HWND; only its process identifier is queried.
+    unsafe {
+        let owner = GetClipboardOwner().ok()?;
+        let mut pid = 0;
+        GetWindowThreadProcessId(owner, Some(&mut pid));
+        (pid != 0).then_some(pid)
+    }
 }
 pub fn desktop_available() -> bool {
     use windows::Win32::System::StationsAndDesktops::{GetUserObjectInformationW, UOI_NAME};

@@ -1,12 +1,28 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Lossy",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "identifier": "app.lossy.desktop",
   "build": { "beforeDevCommand": "npm run dev", "beforeBuildCommand": "npm run build", "devUrl": "http://localhost:1420", "frontendDist": "../dist" },
   "app": {
     "windows": [],
     "security": { "csp": "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src ipc: http://ipc.localhost" }
   },
-  "bundle": { "active": true, "targets": ["nsis"], "icon": ["icons/icon.ico", "icons/icon.png"], "resources": { "../../../integrations/browser/": "browser/" }, "shortDescription": "Your words, kept close.", "category": "Productivity", "windows": { "nsis": { "installMode": "currentUser", "installerHooks": "installer-hooks.nsh" } } }
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": ["icons/icon.ico", "icons/icon.png"],
+    "resources": { "../../../integrations/browser/": "browser/" },
+    "publisher": "Lossy",
+    "homepage": "https://github.com/imthegoodboy/lossy",
+    "copyright": "Lossy | Local draft recovery",
+    "shortDescription": "Your words, kept close.",
+    "category": "Productivity",
+    "windows": { "nsis": {
+      "installMode": "currentUser",
+      "installerIcon": "icons/icon.ico",
+      "uninstallerIcon": "icons/icon.ico",
+      "installerHooks": "installer-hooks.nsh"
+    } }
+  }
 }

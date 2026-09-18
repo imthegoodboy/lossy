@@ -26,6 +26,61 @@ fn capture(s: &mut Service, key: &str, text: &str, trusted: bool) {
 }
 
 #[test]
+fn broader_capture_is_opt_in_and_never_overrides_protected_apps() {
+    let mut prefs: Preferences =
+        serde_json::from_value(json!({"enabled":true,"allowed_apps":["notepad.exe"]})).unwrap();
+    assert!(!prefs.all_desktop_apps);
+    assert!(!crate::capture::allowed("orca.exe", &prefs));
+    assert!(crate::capture::allowed("NOTEPAD.EXE", &prefs));
+    prefs.all_desktop_apps = true;
+    assert!(crate::capture::allowed("orca.exe", &prefs));
+    assert!(crate::capture::allowed("new-editor.exe", &prefs));
+    for exe in [
+        "Chrome.exe",
+        "MSEDGE.EXE",
+        "Bitwarden.exe",
+        "Lossy.exe",
+        "WindowsTerminal.exe",
+        "pwsh.exe",
+        "WhatsApp.exe",
+        "msedgewebview2.exe",
+    ] {
+        prefs.allowed_apps.push(exe.into());
+        assert!(!crate::capture::allowed(exe, &prefs), "must exclude {exe}");
+    }
+}
+
+#[test]
+fn capture_setup_survives_restart_and_reports_metadata_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = service(dir.path());
+    let mut prefs = s.prefs.clone();
+    prefs.all_desktop_apps = true;
+    s.request(json!({"op":"settings","prefs":prefs})).unwrap();
+    prefs.allowed_apps = vec!["C:\\apps\\editor.exe".into()];
+    assert!(s.request(json!({"op":"settings","prefs":prefs})).is_err());
+    drop(s);
+    let mut s = Service::open(dir.path().into(), Default::default()).unwrap();
+    let status = s.request(json!({"op":"status"})).unwrap();
+    assert_eq!(status["prefs"]["all_desktop_apps"], true);
+    let native = status["native"].as_object().unwrap();
+    assert_eq!(native.len(), 3);
+    assert!(
+        native.contains_key("state")
+            && native.contains_key("app")
+            && native.contains_key("checked_at")
+    );
+}
+
+#[test]
+fn process_ownership_fails_closed_for_unknown_processes() {
+    let pid = std::process::id();
+    assert!(crate::platform::same_application_process(pid, pid));
+    assert!(!crate::platform::same_application_process(pid, 0));
+    assert!(!crate::platform::same_application_process(pid, u32::MAX));
+}
+
+#[test]
 fn arrangement_survives_restart_pagination_and_new_capture() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = service(dir.path());

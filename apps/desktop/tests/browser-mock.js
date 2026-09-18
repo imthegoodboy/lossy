@@ -45,6 +45,7 @@
     retention_days: 30,
     allowed_apps: ["notepad.exe", "mspaint.exe"],
     browser_capture: true,
+    all_desktop_apps: false,
   };
   let stamp = 1;
   const persist = () => {

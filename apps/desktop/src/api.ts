@@ -18,6 +18,7 @@ export type Preferences = {
   retention_days: number;
   allowed_apps: string[];
   browser_capture: boolean;
+  all_desktop_apps: boolean;
 };
 export type Status = {
   prefs: Preferences;
@@ -25,6 +26,8 @@ export type Status = {
   error?: string;
   data_dir?: string;
   capture?: string;
+  native?: { state: string; app: string; checked_at: number };
+  clipboard_status?: { state: string; app: string; checked_at: number };
 };
 export async function api<T>(payload: Record<string, unknown>): Promise<T> {
   return invoke<T>("request", { payload });

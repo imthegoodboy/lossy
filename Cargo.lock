@@ -2065,7 +2065,7 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
 name = "lossy"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "arboard",
  "base64 0.22.1",
@@ -2087,21 +2087,21 @@ dependencies = [
 
 [[package]]
 name = "lossy-capture-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "blake3",
 ]
 
 [[package]]
 name = "lossy-context-engine"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "lossy-capture-core",
 ]
 
 [[package]]
 name = "lossy-storage"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aes-gcm",
  "blake3",
