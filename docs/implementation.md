@@ -38,10 +38,10 @@ prefix/suffix edits stay in one card; unrelated replacements and WhatsApp switch
 extra cards over incorrect merging. The native context also remembers the title chosen for each
 editor control and the last real window title seen: Windows 11 Notepad briefly reports an empty
 title and then replaces it with the first line, so a related edit keeps the original context
-instead of creating a second card. A window-title change is treated as the same document only
-when the texts are similar at the word level, so template-like documents with different titles
-do not overwrite each other. An unrelated snapshot under a transient empty title waits for the
-new title rather than contaminating the previous card.
+instead of creating a second card. A window-title change is treated as the same document when
+the texts continue each other or share most of their words, so template-like documents with
+different titles do not overwrite each other. An unrelated snapshot under a transient empty
+title waits for the new title rather than contaminating the previous card.
 Clipboard copies use the clipboard-owner process and do not recheck the foreground window, so a
 quick window switch does not lose a copy. Copies whose owner process has already exited are
 retried briefly and then skipped rather than attributed to the foreground app. Known password
