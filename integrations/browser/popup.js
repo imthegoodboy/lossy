@@ -65,8 +65,8 @@ enableButton.onclick = async () => {
       target: { tabId: tab.id },
       files: ["content.js"],
     });
-    status.textContent = "Enabled. Your next edits will be saved locally.";
     await refresh();
+    status.textContent = "Enabled. Your next edits will be saved locally.";
   } catch (e) {
     status.textContent = e.message;
   }
@@ -78,9 +78,9 @@ disableButton.onclick = async () => {
     const { origin, id } = current || (await site());
     await chrome.scripting.unregisterContentScripts({ ids: [id] }).catch(() => {});
     await chrome.permissions.remove({ origins: [origin] });
+    await refresh();
     status.textContent =
       "Disabled. Reload this tab to stop the existing listener.";
-    await refresh();
   } catch (e) {
     status.textContent = e.message;
   }

@@ -812,6 +812,27 @@ fn clipboard_watch(
                 handled_sequence = current;
                 continue;
             }
+            match crate::platform::clipboard_opted_out() {
+                Some(false) => {}
+                Some(true) => {
+                    crate::capture::report(&health, "", "Clipboard privacy marker; copy skipped");
+                    handled_sequence = current;
+                    continue;
+                }
+                None => {
+                    crate::capture::report(
+                        &health,
+                        "",
+                        "Clipboard privacy check unavailable; retrying",
+                    );
+                    if attempts >= 8 {
+                        handled_sequence = current;
+                    } else {
+                        attempts += 1;
+                    }
+                    continue;
+                }
+            }
             let Some(exe) = clipboard_source() else {
                 crate::capture::report(&health, "", "No source app for the clipboard copy");
                 if attempts >= 8 {
