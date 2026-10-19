@@ -3,10 +3,12 @@ import { openFolder, type Preferences, type Status } from "./api";
 
 const APP_PATTERN = /^[^\\/:*?"<>|]+\.exe$/i;
 
+/** Trim and lowercase an executable name for consistent app selections. */
 function cleanApp(value: string) {
   return value.trim().toLowerCase();
 }
 
+/** Render capture health and controls for saving, app selection, and browser setup. */
 export function CaptureSetup({
   status,
   busy,
@@ -37,6 +39,7 @@ export function CaptureSetup({
     setApps(prefs.allowed_apps);
   }, [prefs.allowed_apps]);
 
+  /** Persist preference changes, exposing failures in the panel and returning success. */
   async function change(value: Partial<Preferences>) {
     setError("");
     try {
@@ -48,6 +51,7 @@ export function CaptureSetup({
     }
   }
 
+  /** Validate and deduplicate app names, restoring the prior selection if saving fails. */
   async function saveApps(next: string[]) {
     const normalized = [...new Set(next.map(cleanApp).filter(Boolean))];
     if (normalized.length > 100) {
@@ -63,6 +67,7 @@ export function CaptureSetup({
     if (!(await change({ allowed_apps: normalized }))) setApps(previous);
   }
 
+  /** Validate the entered executable and add it once to the selected apps. */
   function addApp() {
     const value = cleanApp(newApp);
     if (!value) return;

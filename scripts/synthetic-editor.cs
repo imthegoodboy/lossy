@@ -42,6 +42,7 @@ class LossySyntheticEditor {
             Console.WriteLine(phase + ": " + System.Text.Encoding.UTF8.GetString(reader.ReadBytes(length)));
         }
     }
+    /// <summary>Exercise native edits, clipboard copies, and a protected field with synthetic data.</summary>
     [STAThread] static void Main() {
         using (var form = new Form { Text = "Lossy synthetic capture verification", Width = 580, Height = 220, TopMost = true })
         using (var box = new TextBox { Multiline = true, Dock = DockStyle.Fill, AccessibleName = "Synthetic message" }) {

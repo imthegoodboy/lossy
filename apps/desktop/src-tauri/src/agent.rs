@@ -63,6 +63,7 @@ pub fn recommended_apps() -> Vec<String> {
 }
 
 impl Default for Preferences {
+    /// Start with saving disabled and the recommended desktop app selection.
     fn default() -> Self {
         Self {
             enabled: false,
@@ -238,6 +239,8 @@ impl Service {
     fn context(&self, key: &str) -> [u8; 32] {
         *blake3::keyed_hash(&self.salt, key.as_bytes()).as_bytes()
     }
+    /// Normalize and save a draft snapshot, updating related edits in its context.
+    /// Empty text finishes the context; disabled, paused, duplicate, or suppressed captures are skipped.
     pub fn capture(
         &mut self,
         key: String,
@@ -366,6 +369,8 @@ impl Service {
         item["color"] = json!(color);
         Ok(item)
     }
+    /// Dispatch a local JSON request for status, settings, or archive operations.
+    /// Return validation and storage failures to the caller as error strings.
     pub fn request(&mut self, request: Value) -> Result<Value, String> {
         let op = request["op"].as_str().ok_or("Missing operation")?;
         let id = || parse_id(request["id"].as_str().unwrap_or_default());
@@ -643,6 +648,8 @@ impl Service {
     }
 }
 
+/// Acquire the singleton listener and start capture workers and the database writer.
+/// Return the bounded message sender used to submit requests and snapshots.
 pub fn launch() -> Result<SyncSender<Message>, String> {
     let listener = crate::ipc::listener()?; // Own the singleton before opening the database.
     let settings = Arc::new(RwLock::new(Preferences::default()));
@@ -744,6 +751,7 @@ pub fn launch() -> Result<SyncSender<Message>, String> {
     });
     Ok(tx)
 }
+/// Resolve the clipboard owner executable, falling back to the foreground app.
 fn clipboard_source() -> Option<String> {
     // The clipboard owner identifies the app that performed the copy even if the
     // user switched windows before the next poll. Fall back to the foreground
@@ -756,6 +764,8 @@ fn clipboard_source() -> Option<String> {
     crate::platform::foreground().map(|(_, exe, _)| exe)
 }
 
+/// Report a focused password field when accessibility can positively identify one.
+/// Missing automation or failed focus queries return false; this is best effort.
 fn password_focused(automation: &Option<uiautomation::UIAutomation>) -> bool {
     automation
         .as_ref()
@@ -763,6 +773,8 @@ fn password_focused(automation: &Option<uiautomation::UIAutomation>) -> bool {
         .is_some_and(|element| element.is_password().ok() == Some(true))
 }
 
+/// Spawn a clipboard poller that applies exclusions, retries transient reads, and
+/// sends deduplicated text or image snapshots to the writer with their sequence.
 fn clipboard_watch(
     tx: SyncSender<Message>,
     settings: Arc<RwLock<Preferences>>,

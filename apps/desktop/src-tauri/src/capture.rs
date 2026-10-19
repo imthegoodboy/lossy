@@ -39,6 +39,8 @@ pub fn report(health: &RwLock<CaptureHealth>, app: &str, state: &str) {
         .as_millis() as u64;
 }
 
+/// Spawn native editor polling with retrying accessibility initialization.
+/// Preserve context across related edits and deduplicate acknowledged snapshots.
 pub fn start(
     tx: SyncSender<Message>,
     settings: Arc<RwLock<Preferences>>,
@@ -217,6 +219,8 @@ pub fn context_title(
     }
 }
 
+/// Read a focused Edit or Document control as its runtime identity and normalized text.
+/// Reject unverifiable ownership, protected fields, oversized text, and focus changes.
 fn read_editor(
     automation: &UIAutomation,
     pid: u32,

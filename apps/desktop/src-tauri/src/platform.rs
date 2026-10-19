@@ -48,6 +48,8 @@ pub fn sid() -> Result<String, String> {
     }
 }
 
+/// Return the foreground process ID, lowercase executable name, and window title.
+/// Return None when the process executable cannot be resolved.
 pub fn foreground() -> Option<(u32, String, String)> {
     unsafe {
         let hwnd = GetForegroundWindow();

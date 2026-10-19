@@ -3,6 +3,9 @@ const enableButton = document.querySelector("#enable");
 const disableButton = document.querySelector("#disable");
 let current = null;
 
+/** Resolve the active normal HTTP(S) tab, origin pattern, and content-script ID.
+ * @throws {Error} If the active tab is private, missing, or uses an unsupported scheme.
+ */
 async function site() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.url || tab.incognito)
@@ -19,6 +22,7 @@ async function site() {
   return { tab, origin, id };
 }
 
+/** Refresh site permission and registration state, disabling controls for invalid tabs. */
 async function refresh() {
   try {
     current = await site();
@@ -42,6 +46,7 @@ async function refresh() {
   }
 }
 
+/** Request site access, register and inject the capture script, then refresh the controls. */
 enableButton.onclick = async () => {
   try {
     const { tab, origin, id } = current || (await site());
@@ -67,6 +72,7 @@ enableButton.onclick = async () => {
   }
 };
 
+/** Remove future script registration and site access, then refresh the controls. */
 disableButton.onclick = async () => {
   try {
     const { origin, id } = current || (await site());

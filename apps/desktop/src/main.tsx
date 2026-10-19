@@ -49,6 +49,7 @@ function ItemGlyph({ kind }: { kind: string }) {
   return <Glyph size={16} weight="regular" aria-hidden="true" />;
 }
 
+/** Render an archive card with opening controls and optional drag or keyboard arrangement. */
 function SavedItem({
   item,
   onOpen,
@@ -521,6 +522,7 @@ function FullItem({
   );
 }
 
+/** Select the saving indicator class, prioritizing connection and error states. */
 function saveStateClass(status: Status | null) {
   if (!status) return "waiting";
   if (status.error) return "error";
@@ -529,6 +531,7 @@ function saveStateClass(status: Status | null) {
   return "on";
 }
 
+/** Describe the connection, error, and saving state for the archive status indicator. */
 function saveStateLabel(status: Status | null) {
   if (!status) return "Connecting…";
   if (status.error) return "Needs attention";
@@ -537,6 +540,7 @@ function saveStateLabel(status: Status | null) {
   return "Saving on · just on this device";
 }
 
+/** Manage archive polling, search, filters, arrangement, and capture preferences. */
 function App() {
   const [items, setItems] = useState<Item[]>([]);
   const [status, setStatus] = useState<Status | null>(null);
@@ -562,6 +566,7 @@ function App() {
   const updatingPreferences = useRef(false);
   const filtering = search !== "" || filter !== "all";
   const canArrange = !filtering;
+  /** Refresh status and filtered pages while protecting active interactions and selections. */
   const refresh = useCallback(async () => {
     if (
       busy.current ||
@@ -631,6 +636,7 @@ function App() {
     setDropTarget(null);
     suppressClickUntil.current = Date.now() + 350;
   }
+  /** Persist an optimistic card move in the unfiltered archive, rolling back on failure. */
   async function moveCard(id: string, target: string) {
     if (!canArrange || arranging.current || id === target) return;
     const from = items.findIndex((item) => item.id === id);
@@ -656,6 +662,7 @@ function App() {
       arranging.current = false;
     }
   }
+  /** Convert an arrow key to a grid destination when archive arrangement is available. */
   function moveWithKeys(id: string, key: string) {
     if (!canArrange || !matrix.current) return;
     const columns = getComputedStyle(matrix.current).gridTemplateColumns.split(

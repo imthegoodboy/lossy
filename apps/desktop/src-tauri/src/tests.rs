@@ -217,6 +217,7 @@ fn command_validation_recovery_copies_filters_and_backup() {
     assert_eq!(backup.list(10, 0).unwrap().len(), 2);
 }
 
+/// Verify supported control types and that related edits share a card while replacements split.
 #[test]
 fn native_document_controls_and_mid_draft_edits_are_supported() {
     // Windows 11 Notepad exposes ControlType.Document, not the classic Edit type.
@@ -249,6 +250,7 @@ fn native_document_controls_and_mid_draft_edits_are_supported() {
     assert_eq!(items(&mut s).len(), 2);
 }
 
+/// Verify CRLF and bare CR normalization both directly and in stored captures.
 #[test]
 fn native_line_endings_are_normalized() {
     assert_eq!(normalize_line_endings("a\r\nb\rc\n"), "a\nb\nc\n");
@@ -268,6 +270,7 @@ fn native_line_endings_are_normalized() {
     assert_eq!(items(&mut s)[0]["text"], "first\nsecond\nthird");
 }
 
+/// Verify clipboard app exclusions, standalone card storage, and own-copy suppression.
 #[test]
 fn clipboard_policy_and_storage_are_separate_from_draft_scope() {
     for app in [
@@ -316,6 +319,7 @@ fn clipboard_policy_and_storage_are_separate_from_draft_scope() {
     assert_eq!(all[0]["text"], "Synthetic clipboard text");
 }
 
+/// Verify transient titles preserve context while unrelated documents select a new title.
 #[test]
 fn volatile_window_titles_do_not_split_native_drafts() {
     use crate::capture::context_title;
@@ -365,6 +369,7 @@ fn volatile_window_titles_do_not_split_native_drafts() {
     );
 }
 
+/// Verify Notepad title churn updates one stored card and increments its revision.
 #[test]
 fn notepad_title_churn_reuses_one_card_end_to_end() {
     use crate::capture::context_title;
