@@ -4,7 +4,7 @@
 
 # Lossy
 
-# status : need some fixes
+ 
 
 ### Keep the thought. Even when the window is gone.
 
