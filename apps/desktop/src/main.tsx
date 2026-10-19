@@ -549,6 +549,7 @@ function App() {
   const [more, setMore] = useState(false);
   const [starting, setStarting] = useState(false);
   const [pageCount, setPageCount] = useState(1);
+  const [refreshTick, setRefreshTick] = useState(0);
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
@@ -563,18 +564,21 @@ function App() {
   const matrix = useRef<HTMLElement>(null);
   const sentinel = useRef<HTMLDivElement>(null);
   const busy = useRef(false);
+  const pendingRefresh = useRef(false);
+  const queryKey = useRef(`${search}|${filter}`);
   const updatingPreferences = useRef(false);
   const filtering = search !== "" || filter !== "all";
   const canArrange = !filtering;
   /** Refresh status and filtered pages while protecting active interactions and selections. */
   const refresh = useCallback(async () => {
-    if (
-      busy.current ||
-      dragId.current ||
-      arranging.current ||
-      updatingPreferences.current
-    )
+    if (dragId.current || arranging.current || updatingPreferences.current)
       return;
+    if (busy.current) {
+      // A search or filter change can arrive while the previous page is still
+      // loading. Remember it and rerun once that request has been discarded.
+      pendingRefresh.current = true;
+      return;
+    }
     busy.current = true;
     const version = interactionVersion.current;
     try {
@@ -608,8 +612,12 @@ function App() {
       setError(String(e));
     } finally {
       busy.current = false;
+      if (pendingRefresh.current) {
+        pendingRefresh.current = false;
+        setRefreshTick((tick) => tick + 1);
+      }
     }
-  }, [pageCount, search, filter]);
+  }, [pageCount, search, filter, refreshTick]);
   useEffect(() => {
     void refresh();
     const timer = setInterval(refresh, 2000);
@@ -620,6 +628,11 @@ function App() {
     return () => window.clearTimeout(timer);
   }, [query]);
   useEffect(() => {
+    const key = `${search}|${filter}`;
+    if (queryKey.current !== key) {
+      queryKey.current = key;
+      interactionVersion.current++;
+    }
     setPageCount(1);
   }, [search, filter]);
   useEffect(() => {
@@ -700,10 +713,10 @@ function App() {
     }
   }
   function enable() {
+    // Enabling saving is separate from the user's sign-in startup choice.
     void updatePreferences({
       enabled: true,
       paused: false,
-      autostart: true,
     }).catch(() => {});
   }
   return (
@@ -857,7 +870,7 @@ function App() {
             }}
             dragging={dragged === item.id}
             dropTarget={dropTarget === item.id && dragged !== item.id}
-            arrangeable={canArrange}
+            arrangeable={canArrange && items.length > 1}
             onDragStart={(event, id) => {
               if (!canArrange || arranging.current) {
                 event.preventDefault();

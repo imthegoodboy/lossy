@@ -1,4 +1,5 @@
 const status = document.querySelector("#status");
+const warning = document.querySelector("#warning");
 const enableButton = document.querySelector("#enable");
 const disableButton = document.querySelector("#disable");
 let current = null;
@@ -19,7 +20,7 @@ async function site() {
     Array.from(new TextEncoder().encode(url.origin))
       .map((n) => n.toString(16))
       .join("");
-  return { tab, origin, id };
+  return { tab, origin, id, secure: url.protocol === "https:" };
 }
 
 /** Refresh site permission and registration state, disabling controls for invalid tabs. */
@@ -35,11 +36,17 @@ async function refresh() {
     const enabled = registered.length > 0 && permitted;
     enableButton.disabled = enabled;
     disableButton.disabled = !enabled;
+    warning.hidden = current.secure;
+    warning.textContent = current.secure
+      ? ""
+      : "Plain HTTP: network attackers can read or change what you type on this site.";
     status.textContent = enabled
       ? "Drafts on this site are saved locally by Lossy."
       : "Not enabled here. Lossy only saves sites you choose.";
   } catch (e) {
     current = null;
+    warning.hidden = true;
+    warning.textContent = "";
     enableButton.disabled = true;
     disableButton.disabled = true;
     status.textContent = e.message;
@@ -49,7 +56,9 @@ async function refresh() {
 /** Request site access, register and inject the capture script, then refresh the controls. */
 enableButton.onclick = async () => {
   try {
-    const { tab, origin, id } = current || (await site());
+    // Query the active tab again so a navigation while the popup was open
+    // cannot register the previous origin.
+    const { tab, origin, id } = await site();
     if (!(await chrome.permissions.request({ origins: [origin] }))) return;
     await chrome.scripting.unregisterContentScripts({ ids: [id] }).catch(() => {});
     await chrome.scripting.registerContentScripts([
@@ -75,7 +84,7 @@ enableButton.onclick = async () => {
 /** Remove future script registration and site access, then refresh the controls. */
 disableButton.onclick = async () => {
   try {
-    const { origin, id } = current || (await site());
+    const { origin, id } = await site();
     await chrome.scripting.unregisterContentScripts({ ids: [id] }).catch(() => {});
     await chrome.permissions.remove({ origins: [origin] });
     await refresh();

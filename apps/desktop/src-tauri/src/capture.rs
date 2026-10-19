@@ -1,4 +1,4 @@
-use crate::agent::{Message, Preferences, related_draft};
+use crate::agent::{Message, Preferences, related_draft, similar_draft};
 use serde::Serialize;
 use std::{
     collections::HashMap,
@@ -11,7 +11,8 @@ use std::{
 use uiautomation::{
     UIAutomation,
     patterns::{UITextPattern, UIValuePattern},
-    types::ControlType,
+    types::{ControlType, UIProperty},
+    variants::Value,
 };
 
 #[derive(Clone, Serialize)]
@@ -70,8 +71,11 @@ pub fn start(
             // first line as its title, and some editors briefly report an empty
             // title while redrawing. Remember the title chosen for each editor
             // control, keep it while its text continues the same draft, and only
-            // switch when the text is clearly unrelated (a new document).
-            let mut identities: HashMap<String, (String, String)> = HashMap::new();
+            // switch when the text is clearly unrelated (a new document). The
+            // last real title is tracked separately so a new document in the
+            // same editor is recognised even while the context key still carries
+            // the app-name fallback.
+            let mut identities: HashMap<String, (String, String, Option<String>)> = HashMap::new();
             loop {
                 std::thread::sleep(Duration::from_millis(35));
                 let prefs = settings.read().unwrap().clone();
@@ -117,17 +121,33 @@ pub fn start(
                 };
                 let stable = stable_title(&title);
                 let identity = format!("{pid}|{exe}|{runtime}");
-                let previous = identities.get(&identity);
+                let previous = identities
+                    .get(&identity)
+                    .map(|(context, text, last_title)| {
+                        (context.as_str(), text.as_str(), last_title.as_deref())
+                    });
+                // Copy what is needed from the previous entry before the map is mutated.
+                let had_previous = previous.is_some();
+                let previous_last_title = previous.and_then(|(_, _, last)| last.map(str::to_owned));
+                if title_pending(&stable, previous, &text) {
+                    report(&health, &exe, "Waiting for the new document title");
+                    continue;
+                }
                 let context_title = context_title(&stable, &exe, previous, &text);
                 // Do not replace a known editor's title with a transient empty
                 // title. That would lose the document identity just as the user
                 // switches documents. With no prior state, remember the empty
                 // title as the app name so the first real title can refine it.
-                if !stable.is_empty() || previous.is_none() {
+                if !stable.is_empty() || !had_previous {
                     if identities.len() >= 128 && !identities.contains_key(&identity) {
                         identities.clear();
                     }
-                    identities.insert(identity, (context_title.clone(), text.clone()));
+                    let last_title = if stable.is_empty() {
+                        previous_last_title
+                    } else {
+                        Some(stable.clone())
+                    };
+                    identities.insert(identity, (context_title.clone(), text.clone(), last_title));
                 }
                 let context = format!("native|{pid}|{exe}|{context_title}|{runtime}");
                 let display_title = if stable.is_empty() {
@@ -194,29 +214,57 @@ fn stable_title(title: &str) -> String {
 
 /// Choose the title used in a native context key. Empty titles and title
 /// changes caused by editing the same draft keep the original context; a
-/// different title with unrelated text selects a new document context.
+/// different title with unrelated text selects a new document context. The
+/// last real title seen for this editor is tracked separately from the context
+/// key, so template-like documents that share a greeting keep separate cards.
 pub fn context_title(
     stable: &str,
     exe: &str,
-    previous: Option<&(String, String)>,
+    previous: Option<(&str, &str, Option<&str>)>,
     text: &str,
 ) -> String {
-    match previous {
-        Some((context_title, previous_text))
-            if stable.is_empty()
-                || stable == context_title
-                || (!previous_text.is_empty() && related_draft(previous_text, text)) =>
-        {
-            context_title.clone()
-        }
-        _ => {
-            if stable.is_empty() {
-                exe.to_owned()
-            } else {
-                stable.to_owned()
+    if let Some((context_title, previous_text, last_title)) = previous {
+        let known_title = last_title.unwrap_or(context_title);
+        if stable.is_empty() {
+            if previous_text.is_empty() || text.is_empty() || similar_draft(previous_text, text) {
+                return context_title.to_owned();
             }
+        } else if stable == known_title {
+            return context_title.to_owned();
+        } else if last_title.is_none() {
+            // No real title has ever been seen for this editor; keep the
+            // app-name fallback while the text continues the same draft.
+            if previous_text.is_empty() || text.is_empty() || related_draft(previous_text, text) {
+                return context_title.to_owned();
+            }
+        } else if !previous_text.is_empty()
+            && !text.is_empty()
+            && similar_draft(previous_text, text)
+        {
+            return context_title.to_owned();
         }
     }
+    if stable.is_empty() {
+        exe.to_owned()
+    } else {
+        stable.to_owned()
+    }
+}
+
+/// A switch can briefly expose an empty window title before the new document's
+/// title arrives. If the text is unrelated to the previous snapshot, skip that
+/// sample instead of writing it into the old card and then starting a second card
+/// when the title appears.
+pub fn title_pending(
+    stable: &str,
+    previous: Option<(&str, &str, Option<&str>)>,
+    text: &str,
+) -> bool {
+    stable.is_empty()
+        && !text.is_empty()
+        && previous.is_some_and(|(_, previous_text, _)| {
+            !previous_text.is_empty() && !similar_draft(previous_text, text)
+        })
 }
 
 /// Read a focused Edit or Document control as its runtime identity and normalized text.
@@ -252,6 +300,19 @@ fn read_editor(
     // Prefer ValuePattern when it is available and writable. Document controls
     // such as Notepad expose it; Word and some Electron editors only expose
     // TextPattern, so fall through instead of giving up on a ValuePattern error.
+    // The stack property is available even when only TextPattern is exposed, so
+    // check it before falling back to TextPattern.
+    let property_read_only = element
+        .get_property_value(UIProperty::ValueIsReadOnly)
+        .ok()
+        .and_then(|value| value.get_value().ok())
+        .and_then(|value| match value {
+            Value::BOOL(value) => Some(value),
+            _ => None,
+        });
+    if property_read_only == Some(true) {
+        return Err("Read-only field excluded");
+    }
     let mut value = None;
     if let Ok(pattern) = element.get_pattern::<UIValuePattern>() {
         if pattern.is_readonly().unwrap_or(true) {

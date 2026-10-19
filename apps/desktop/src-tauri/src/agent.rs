@@ -3,7 +3,7 @@ use lossy_storage::{DraftContent, ItemId, SavedDraft, Store};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::PathBuf,
     sync::{
         Arc, RwLock,
@@ -116,6 +116,36 @@ pub fn related_draft(before: &str, after: &str) -> bool {
     prefix + suffix >= shortest.div_ceil(2)
 }
 
+/// Word-level similarity for the case where the window title changes. A shared
+/// greeting and sign-off are not enough to call two template-like documents one
+/// edit, so titles only carry over when most words are shared. Prefix/suffix
+/// drafting keeps the stricter character test above.
+pub fn similar_draft(before: &str, after: &str) -> bool {
+    if before == after || before.starts_with(after) || after.starts_with(before) {
+        return true;
+    }
+    if before.chars().count() < 8 || after.chars().count() < 8 {
+        return related_draft(before, after);
+    }
+    let words = |text: &str| -> HashSet<String> {
+        text.split_whitespace()
+            .map(|word| {
+                word.trim_matches(|c: char| !c.is_alphanumeric())
+                    .to_lowercase()
+            })
+            .filter(|word| !word.is_empty())
+            .collect()
+    };
+    let before_words = words(before);
+    let after_words = words(after);
+    if before_words.is_empty() || after_words.is_empty() {
+        return related_draft(before, after);
+    }
+    let shared = before_words.intersection(&after_words).count();
+    let union = before_words.union(&after_words).count();
+    shared * 4 >= union * 3
+}
+
 pub enum Message {
     Request(Value, SyncSender<Result<Value, String>>),
     Capture {
@@ -130,6 +160,7 @@ pub enum Message {
         kind: String,
         source: String,
         sequence: u32,
+        committed: SyncSender<bool>,
     },
 }
 pub fn directory() -> PathBuf {
@@ -723,12 +754,20 @@ pub fn launch() -> Result<SyncSender<Message>, String> {
                     kind,
                     source,
                     sequence,
+                    committed,
                 }) => {
-                    if let Ok(s) = &mut service
-                        && let Err(e) = s.clipboard(text, kind, source, sequence)
-                    {
-                        s.last_error = Some(e);
-                    }
+                    let saved = if let Ok(s) = &mut service {
+                        match s.clipboard(text, kind, source, sequence) {
+                            Ok(()) => true,
+                            Err(e) => {
+                                s.last_error = Some(e);
+                                false
+                            }
+                        }
+                    } else {
+                        false
+                    };
+                    let _ = committed.send(saved);
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
                 _ => {}
@@ -751,26 +790,29 @@ pub fn launch() -> Result<SyncSender<Message>, String> {
     });
     Ok(tx)
 }
-/// Resolve the clipboard owner executable, falling back to the foreground app.
+/// Resolve the clipboard owner executable. Return None when the owner process
+/// has exited or cannot be resolved; the watcher retries briefly and skips it.
 fn clipboard_source() -> Option<String> {
     // The clipboard owner identifies the app that performed the copy even if the
-    // user switched windows before the next poll. Fall back to the foreground
-    // app for copies whose owner has already exited (some OLE/delayed renders).
-    if let Some(pid) = crate::platform::clipboard_owner_pid()
-        && let Some(exe) = crate::platform::process_exe(pid)
-    {
-        return Some(exe);
-    }
-    crate::platform::foreground().map(|(_, exe, _)| exe)
+    // user switched windows before the next poll. Do not guess from the
+    // foreground window: a password manager that exited after copying must not
+    // be recorded under whatever app happens to be focused next. Ownerless
+    // copies are retried briefly by the watcher and then skipped.
+    let pid = crate::platform::clipboard_owner_pid()?;
+    crate::platform::process_exe(pid)
 }
 
-/// Report a focused password field when accessibility can positively identify one.
-/// Missing automation or failed focus queries return false; this is best effort.
-fn password_focused(automation: &Option<uiautomation::UIAutomation>) -> bool {
+/// Report a focused password or sensitive-name field when accessibility can
+/// positively identify one. Missing automation or failed focus queries return
+/// false; this is best effort.
+fn sensitive_focused(automation: &Option<uiautomation::UIAutomation>) -> bool {
     automation
         .as_ref()
         .and_then(|automation| automation.get_focused_element().ok())
-        .is_some_and(|element| element.is_password().ok() == Some(true))
+        .is_some_and(|element| {
+            element.is_password().ok() == Some(true)
+                || crate::capture::sensitive(&element.get_name().unwrap_or_default())
+        })
 }
 
 /// Spawn a clipboard poller that applies exclusions, retries transient reads, and
@@ -813,9 +855,8 @@ fn clipboard_watch(
                 continue;
             }
             match crate::platform::clipboard_opted_out() {
-                Some(false) => {}
                 Some(true) => {
-                    crate::capture::report(&health, "", "Clipboard privacy marker; copy skipped");
+                    crate::capture::report(&health, "", "Clipboard copy marked as private");
                     handled_sequence = current;
                     continue;
                 }
@@ -823,7 +864,7 @@ fn clipboard_watch(
                     crate::capture::report(
                         &health,
                         "",
-                        "Clipboard privacy check unavailable; retrying",
+                        "Clipboard privacy markers unavailable; retrying",
                     );
                     if attempts >= 8 {
                         handled_sequence = current;
@@ -832,6 +873,11 @@ fn clipboard_watch(
                     }
                     continue;
                 }
+                Some(false) => {}
+            }
+            if crate::platform::clipboard_sequence() != current {
+                crate::capture::report(&health, "", "Clipboard changed while checking privacy");
+                continue;
             }
             let Some(exe) = clipboard_source() else {
                 crate::capture::report(&health, "", "No source app for the clipboard copy");
@@ -847,10 +893,15 @@ fn clipboard_watch(
                 handled_sequence = current;
                 continue;
             }
-            // A password field was focused when the poll happened. This is a
-            // best-effort guard; explicit copies from ordinary fields are kept.
-            if password_focused(&automation) {
-                crate::capture::report(&health, &exe, "Password field was focused; copy skipped");
+            // A password or sensitive named field was focused when the poll
+            // happened. This is a best-effort guard; explicit copies from
+            // ordinary fields are kept.
+            if sensitive_focused(&automation) {
+                crate::capture::report(
+                    &health,
+                    &exe,
+                    "Password or sensitive field was focused; copy skipped",
+                );
                 handled_sequence = current;
                 continue;
             }
@@ -925,14 +976,35 @@ fn clipboard_watch(
                 handled_sequence = current;
                 continue;
             }
+            let (committed, result) = mpsc::sync_channel(1);
+            if tx
+                .send(Message::Clipboard {
+                    text,
+                    kind: kind.into(),
+                    source: format!("Clipboard · {}", exe.trim_end_matches(".exe")),
+                    sequence: current,
+                    committed,
+                })
+                .is_err()
+            {
+                crate::capture::report(&health, &exe, "Background writer stopped; restart Lossy");
+                break;
+            }
+            // Only stop retrying after the writer confirms the copy reached the
+            // encrypted store. A failed save must not suppress an identical retry.
+            if !result
+                .recv_timeout(Duration::from_secs(10))
+                .unwrap_or(false)
+            {
+                crate::capture::report(&health, &exe, "Clipboard snapshot not committed; retrying");
+                if attempts >= 8 {
+                    handled_sequence = current;
+                } else {
+                    attempts += 1;
+                }
+                continue;
+            }
             previous = hash;
-            crate::capture::report(&health, &exe, "Clipboard snapshot sent to the local writer");
-            let _ = tx.send(Message::Clipboard {
-                text,
-                kind: kind.into(),
-                source: format!("Clipboard · {}", exe.trim_end_matches(".exe")),
-                sequence: current,
-            });
             handled_sequence = current;
         }
     });

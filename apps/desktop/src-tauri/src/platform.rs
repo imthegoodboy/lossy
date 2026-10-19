@@ -183,6 +183,7 @@ pub fn clipboard_owner_pid() -> Option<u32> {
         (pid != 0).then_some(pid)
     }
 }
+
 pub fn desktop_available() -> bool {
     use windows::Win32::System::StationsAndDesktops::{GetUserObjectInformationW, UOI_NAME};
     unsafe {

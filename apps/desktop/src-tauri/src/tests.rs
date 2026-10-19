@@ -1,4 +1,4 @@
-use crate::agent::{Preferences, Service, normalize_line_endings, related_draft};
+use crate::agent::{Preferences, Service, normalize_line_endings, related_draft, similar_draft};
 use serde_json::{Value, json};
 use std::sync::{Arc, RwLock};
 
@@ -23,6 +23,10 @@ fn items(s: &mut Service) -> Vec<Value> {
 fn capture(s: &mut Service, key: &str, text: &str, trusted: bool) {
     s.capture(key.into(), text.into(), "Synthetic editor".into(), trusted)
         .unwrap();
+}
+type Prior = (String, String, Option<String>);
+fn prior_view(prior: &Prior) -> (&str, &str, Option<&str>) {
+    (prior.0.as_str(), prior.1.as_str(), prior.2.as_deref())
 }
 
 #[test]
@@ -182,6 +186,9 @@ fn pause_private_secure_and_disabled_capture_are_not_saved() {
     capture(&mut s, "a", "Disabled synthetic content", true);
     assert!(items(&mut s).is_empty());
     assert!(crate::capture::sensitive("Password"));
+    assert!(crate::capture::sensitive("API key"));
+    assert!(crate::capture::sensitive("One-time verification code"));
+    assert!(!crate::capture::sensitive("Search messages"));
     assert!(!crate::capture::allowed("chrome.exe", &s.prefs));
 }
 
@@ -322,24 +329,50 @@ fn clipboard_policy_and_storage_are_separate_from_draft_scope() {
 /// Verify transient titles preserve context while unrelated documents select a new title.
 #[test]
 fn volatile_window_titles_do_not_split_native_drafts() {
-    use crate::capture::context_title;
+    use crate::capture::{context_title, title_pending};
 
     assert_eq!(
         context_title("", "notepad.exe", None, "Lossy value check"),
         "notepad.exe"
     );
-    let notepad_prior = ("notepad.exe".to_owned(), "Lossy value check abc".to_owned());
+    let notepad_prior = (
+        "notepad.exe".to_owned(),
+        "Lossy value check abc".to_owned(),
+        None,
+    );
     // Windows 11 Notepad uses the first line as its title and briefly reports
     // an empty title while the edit is committed.
     assert_eq!(
-        context_title("", "notepad.exe", Some(&notepad_prior), "changed"),
+        context_title(
+            "",
+            "notepad.exe",
+            Some(prior_view(&notepad_prior)),
+            "changed"
+        ),
         "notepad.exe"
     );
+    // An unrelated snapshot under a transient empty title waits for the new
+    // title instead of contaminating the previous card and then duplicating it.
+    assert!(title_pending(
+        "",
+        Some(prior_view(&notepad_prior)),
+        "A different document"
+    ));
+    assert!(!title_pending(
+        "",
+        Some(prior_view(&notepad_prior)),
+        "Lossy value check abc edited"
+    ));
+    assert!(!title_pending(
+        "A different document",
+        Some(prior_view(&notepad_prior)),
+        "A different document"
+    ));
     assert_eq!(
         context_title(
             "Lossy value check abc edited",
             "notepad.exe",
-            Some(&notepad_prior),
+            Some(prior_view(&notepad_prior)),
             "Lossy value check abc edited"
         ),
         "notepad.exe"
@@ -349,7 +382,7 @@ fn volatile_window_titles_do_not_split_native_drafts() {
         context_title(
             "A different document",
             "notepad.exe",
-            Some(&notepad_prior),
+            Some(prior_view(&notepad_prior)),
             "A different document"
         ),
         "A different document"
@@ -357,12 +390,13 @@ fn volatile_window_titles_do_not_split_native_drafts() {
     let same_title_prior = (
         "Lossy value check abc".to_owned(),
         "First synthetic sentence".to_owned(),
+        Some("Lossy value check abc".to_owned()),
     );
     assert_eq!(
         context_title(
             "Lossy value check abc",
             "notepad.exe",
-            Some(&same_title_prior),
+            Some(prior_view(&same_title_prior)),
             "A completely separate note"
         ),
         "Lossy value check abc"
@@ -370,6 +404,50 @@ fn volatile_window_titles_do_not_split_native_drafts() {
 }
 
 /// Verify Notepad title churn updates one stored card and increments its revision.
+#[test]
+fn template_documents_with_different_titles_stay_apart() {
+    use crate::capture::context_title;
+
+    let first = "Hi Alice,\nThanks,\nBob";
+    let second = "Hi Alice,\nThanks,\nEve";
+    assert!(!similar_draft(first, second));
+    assert!(similar_draft(
+        "The quick brown fox jumps over the lazy dog",
+        "The quick brown cat jumps over the lazy dog"
+    ));
+
+    // The title changed because the first line was edited: same document.
+    let first_line_prior = (
+        "notepad.exe".to_owned(),
+        "The quick brown fox jumps over the lazy dog".to_owned(),
+        Some("The quick brown fox jumps over the lazy dog".to_owned()),
+    );
+    assert_eq!(
+        context_title(
+            "The quick brown cat jumps over the lazy dog",
+            "notepad.exe",
+            Some(prior_view(&first_line_prior)),
+            "The quick brown cat jumps over the lazy dog"
+        ),
+        "notepad.exe"
+    );
+    // A different template under a new title takes its own context.
+    let template_prior = (
+        "Email draft".to_owned(),
+        first.to_owned(),
+        Some("Email draft".to_owned()),
+    );
+    assert_eq!(
+        context_title(
+            "Second email",
+            "notepad.exe",
+            Some(prior_view(&template_prior)),
+            second
+        ),
+        "Second email"
+    );
+}
+
 #[test]
 fn notepad_title_churn_reuses_one_card_end_to_end() {
     use crate::capture::context_title;
@@ -383,10 +461,15 @@ fn notepad_title_churn_reuses_one_card_end_to_end() {
     // First poll: Windows briefly reports an empty title.
     let first_title = context_title("", exe, None, initial);
     let first_context = format!("native|{pid}|{exe}|{first_title}|{runtime}");
-    let prior = (first_title.clone(), initial.to_owned());
+    let prior = (first_title.clone(), initial.to_owned(), None);
     // Next poll: Notepad replaces the title with the first line while the edit
     // continues. The context must stay on the app-name fallback.
-    let next_title = context_title("Lossy value check abc edited", exe, Some(&prior), edited);
+    let next_title = context_title(
+        "Lossy value check abc edited",
+        exe,
+        Some(prior_view(&prior)),
+        edited,
+    );
     let next_context = format!("native|{pid}|{exe}|{next_title}|{runtime}");
     assert_eq!(first_context, next_context);
 

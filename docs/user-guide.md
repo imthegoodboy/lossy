@@ -7,9 +7,9 @@
 
 Install the x64 installer from [Releases](https://github.com/imthegoodboy/lossy/releases). The
 initial build is unsigned; Windows may warn about an unknown publisher. Only install trusted builds.
-Press **Start saving** and test a synthetic Notepad draft. This enables tray-only startup
-at sign-in. Closing the archive leaves saving running. **Quit Lossy** in the tray stops saving
-until the next app start.
+Press **Start saving** and test a synthetic Notepad draft. This enables capture. Quiet
+sign-in startup is a separate checkbox in **Capture setup**. Closing the archive leaves saving
+running. **Quit Lossy** in the tray stops saving until the next app start.
 
 ## Supported capture
 
@@ -19,8 +19,8 @@ until the next app start.
 | Native UI Automation Edit/Document fields | Notepad, Word, Office and other standard editors; selected apps or optional broader desktop capture; full executable-path checks also support separate renderer processes |
 | Standard web text boxes | Opt-in [Chrome/Edge companion](browser-companion.md) |
 | WhatsApp Web | Best-effort isolation; uncertain chat switches make separate cards |
-| Native clipboard | Any desktop app except password managers; text and PNG bitmap images, including browser copies |
-| Private windows, password fields, known password managers | Excluded from passive drafts; clipboard copies are skipped when a password field is focused |
+| Native clipboard | Any desktop app except password managers and Lossy; text and PNG bitmap images, including browser copies; Windows privacy markers are respected |
+| Private windows, password fields, known password managers | Excluded from passive drafts; clipboard copies are best-effort skipped when a password or sensitive named field is focused |
 | WhatsApp Desktop, terminals, elevated/inaccessible editors | Not reliably supported for drafts; explicit copies can still be kept |
 
 Cursor/VS Code capture depends on standard editable accessibility fields. Incompatible native
@@ -76,10 +76,13 @@ Images preserve PNG pixels, not filenames or animations.
 
 Limits: native drafts 1 MiB; browser text 200,000 UTF-16 characters; images 16 million pixels
 and 6 MiB after base64 PNG encoding. Clipboard copies from Paint, Snipping Tool, browsers and
-other desktop apps are kept, except known password managers and Lossy itself. Copies made while a password field is focused are skipped
-when Windows exposes that state. File-drop lists are not captured. Lossy's own copies are skipped.
-Copies whose owner has already exited fall back to the foreground app; if neither can be identified,
-the copy is retried briefly and then skipped. Capture setup reports the last clipboard check separately.
+other desktop apps are kept, except known password managers and Lossy itself. Copies marked
+private with the documented Windows clipboard formats are skipped. Copies made while a password
+or sensitive named field is focused are skipped when Windows exposes that state; the check is
+best effort and can miss a copy made just before focus changes. File-drop lists are not captured.
+Lossy's own copies are skipped. Copies whose owner process has already exited are retried
+briefly and then skipped instead of being attributed to the foreground app. Capture setup
+reports the last clipboard check separately.
 Image reading currently accepts PNG and DIBV5 clipboard formats; CF_BITMAP-only copies are not supported.
 
 ## Privacy, retention and recovery
