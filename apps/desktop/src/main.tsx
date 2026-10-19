@@ -12,6 +12,7 @@ import {
   Copy,
   DotsSixVertical,
   Image as ImageIcon,
+  MagnifyingGlass,
   PushPin,
   TextAlignLeft,
   X,
@@ -25,6 +26,15 @@ import {
 } from "./api";
 import { CaptureSetup } from "./CaptureSetup";
 import "./style.css";
+
+const FILTERS = [
+  { value: "all", label: "All" },
+  { value: "draft", label: "Drafts" },
+  { value: "clipboard", label: "Clipboard" },
+  { value: "image", label: "Images" },
+  { value: "note", label: "Notes" },
+  { value: "pinned", label: "Pinned" },
+] as const;
 
 function shortTime(value: number) {
   const date = new Date(value);
@@ -44,6 +54,7 @@ function SavedItem({
   onOpen,
   dragging,
   dropTarget,
+  arrangeable,
   onDragStart,
   onDragEnd,
   onDragOver,
@@ -54,6 +65,7 @@ function SavedItem({
   onOpen: (item: Item) => void;
   dragging: boolean;
   dropTarget: boolean;
+  arrangeable: boolean;
   onDragStart: (event: DragEvent, id: string) => void;
   onDragEnd: () => void;
   onDragOver: (event: DragEvent, id: string) => void;
@@ -68,7 +80,7 @@ function SavedItem({
       tabIndex={0}
       aria-haspopup="dialog"
       aria-label={`Open ${item.heading || "Saved item"}`}
-      aria-describedby="arrange-help"
+      aria-describedby={arrangeable ? "arrange-help" : undefined}
       onDragOver={(event) => onDragOver(event, item.id)}
       onDrop={(event) => onDrop(event, item.id)}
       onClick={() => {
@@ -76,6 +88,7 @@ function SavedItem({
       }}
       onKeyDown={(event) => {
         if (
+          arrangeable &&
           event.altKey &&
           ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(
             event.key,
@@ -92,12 +105,20 @@ function SavedItem({
       }}
     >
       <header
-        draggable
+        draggable={arrangeable}
         onDragStart={(event) => onDragStart(event, item.id)}
         onDragEnd={onDragEnd}
-        title="Drag to rearrange. Or focus this card and use Alt + arrow keys."
+        title={
+          arrangeable
+            ? "Drag to rearrange. Or focus this card and use Alt + arrow keys."
+            : undefined
+        }
       >
-        <DotsSixVertical className="drag-grip" size={15} aria-hidden="true" />
+        <DotsSixVertical
+          className={`drag-grip${arrangeable ? "" : " hidden"}`}
+          size={15}
+          aria-hidden="true"
+        />
         <span className="card-source" title={item.source}>
           <ItemGlyph kind={item.kind} />
           <span>{item.source}</span>
@@ -500,6 +521,22 @@ function FullItem({
   );
 }
 
+function saveStateClass(status: Status | null) {
+  if (!status) return "waiting";
+  if (status.error) return "error";
+  if (!status.prefs.enabled) return "off";
+  if (status.prefs.paused) return "paused";
+  return "on";
+}
+
+function saveStateLabel(status: Status | null) {
+  if (!status) return "Connecting…";
+  if (status.error) return "Needs attention";
+  if (!status.prefs.enabled) return "Saving is off";
+  if (status.prefs.paused) return "Saving paused";
+  return "Saving on · just on this device";
+}
+
 function App() {
   const [items, setItems] = useState<Item[]>([]);
   const [status, setStatus] = useState<Status | null>(null);
@@ -508,6 +545,9 @@ function App() {
   const [more, setMore] = useState(false);
   const [starting, setStarting] = useState(false);
   const [pageCount, setPageCount] = useState(1);
+  const [query, setQuery] = useState("");
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState("all");
   const [selected, setSelected] = useState<Item | null>(null);
   const [dragged, setDragged] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
@@ -520,6 +560,8 @@ function App() {
   const sentinel = useRef<HTMLDivElement>(null);
   const busy = useRef(false);
   const updatingPreferences = useRef(false);
+  const filtering = search !== "" || filter !== "all";
+  const canArrange = !filtering;
   const refresh = useCallback(async () => {
     if (
       busy.current ||
@@ -542,6 +584,8 @@ function App() {
           const batch = await api<{ items: Item[]; more: boolean }>({
             op: "list",
             offset: page * 60,
+            search,
+            filter,
           });
           collected.push(...batch.items);
           hasMore = batch.more;
@@ -560,12 +604,19 @@ function App() {
     } finally {
       busy.current = false;
     }
-  }, [pageCount]);
+  }, [pageCount, search, filter]);
   useEffect(() => {
     void refresh();
     const timer = setInterval(refresh, 2000);
     return () => clearInterval(timer);
   }, [refresh]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSearch(query.trim()), 180);
+    return () => window.clearTimeout(timer);
+  }, [query]);
+  useEffect(() => {
+    setPageCount(1);
+  }, [search, filter]);
   useEffect(() => {
     const observer = new IntersectionObserver(([entry]) => {
       if (entry.isIntersecting && more && !busy.current)
@@ -581,7 +632,7 @@ function App() {
     suppressClickUntil.current = Date.now() + 350;
   }
   async function moveCard(id: string, target: string) {
-    if (arranging.current || id === target) return;
+    if (!canArrange || arranging.current || id === target) return;
     const from = items.findIndex((item) => item.id === id);
     const to = items.findIndex((item) => item.id === target);
     if (from < 0 || to < 0) return;
@@ -606,7 +657,7 @@ function App() {
     }
   }
   function moveWithKeys(id: string, key: string) {
-    if (!matrix.current) return;
+    if (!canArrange || !matrix.current) return;
     const columns = getComputedStyle(matrix.current).gridTemplateColumns.split(
       " ",
     ).length;
@@ -662,22 +713,25 @@ function App() {
             {ready ? `${items.length}${more ? "+" : ""}` : ""}
           </span>
         </h1>
-        <p>Just on this device</p>
+        <p className={`save-state ${saveStateClass(status)}`} role="status">
+          <span className="save-dot" aria-hidden="true" />
+          {saveStateLabel(status)}
+        </p>
       </header>
       {status && !status.prefs.enabled && !status.error && (
-        <label className="consent">
-          <input
-            type="checkbox"
-            checked={false}
-            disabled={starting}
-            onChange={enable}
-          />
-          <span>
-            Enable local saving for the selected apps and start quietly with
-            Windows. Nothing is captured until you enable this. Choose your apps
-            in Capture setup below.
-          </span>
-        </label>
+        <section className="starter">
+          <div>
+            <h2>Keep the thought, even when the window is gone.</h2>
+            <p>
+              Lossy saves unfinished text and recent copies on this PC. Known
+              password managers and password fields stay out. Nothing is
+              captured until you start.
+            </p>
+          </div>
+          <button className="primary" disabled={starting} onClick={enable}>
+            {starting ? "Starting…" : "Start saving"}
+          </button>
+        </section>
       )}
       {status && !status.error && (
         <CaptureSetup
@@ -692,10 +746,15 @@ function App() {
           {error || status?.error}
         </p>
       )}
-      {status?.prefs.paused && (
-        <p className="notice">
-          Saving is paused. Resume in Capture setup or from the system tray.
-        </p>
+      {status?.prefs.paused && status.prefs.enabled && (
+        <section className="banner" role="status">
+          <span>Saving is paused. Nothing new will be kept.</span>
+          <button
+            onClick={() => void updatePreferences({ paused: false }).catch(() => {})}
+          >
+            Resume saving
+          </button>
+        </section>
       )}
       {!ready && !error && (
         <section
@@ -712,15 +771,72 @@ function App() {
           ))}
         </section>
       )}
+      {ready && (items.length > 0 || filtering) && (
+        <div className="archive-tools">
+          <label className="search-box">
+            <MagnifyingGlass size={17} aria-hidden="true" />
+            <input
+              type="search"
+              aria-label="Search saved items"
+              placeholder="Search saved words…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            {query && (
+              <button
+                type="button"
+                className="clear-search"
+                aria-label="Clear search"
+                onClick={() => setQuery("")}
+              >
+                <X size={14} />
+              </button>
+            )}
+          </label>
+          <div className="filters" role="group" aria-label="Filter saved items">
+            {FILTERS.map((entry) => (
+              <button
+                type="button"
+                key={entry.value}
+                className={`filter-chip${filter === entry.value ? " active" : ""}`}
+                aria-pressed={filter === entry.value}
+                onClick={() => setFilter(entry.value)}
+              >
+                {entry.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       {ready && items.length === 0 && (
         <div className="empty">
-          <TextAlignLeft size={32} weight="light" aria-hidden="true" />
-          <h2>A place for your unfinished thoughts.</h2>
-          <p>
-            Text and images from supported apps will appear here.
-            <br />
-            Click any saved item to pick up where you left off.
-          </p>
+          {filtering ? (
+            <>
+              <MagnifyingGlass size={32} weight="light" aria-hidden="true" />
+              <h2>No matches</h2>
+              <p>Try a different word or filter.</p>
+              <button
+                className="quiet"
+                onClick={() => {
+                  setQuery("");
+                  setSearch("");
+                  setFilter("all");
+                }}
+              >
+                Clear search and filters
+              </button>
+            </>
+          ) : (
+            <>
+              <TextAlignLeft size={32} weight="light" aria-hidden="true" />
+              <h2>A place for your unfinished thoughts.</h2>
+              <p>
+                Text and images from supported apps will appear here.
+                <br />
+                Click any saved item to pick up where you left off.
+              </p>
+            </>
+          )}
         </div>
       )}
       <section ref={matrix} className="matrix" aria-label="Saved items">
@@ -734,8 +850,9 @@ function App() {
             }}
             dragging={dragged === item.id}
             dropTarget={dropTarget === item.id && dragged !== item.id}
+            arrangeable={canArrange}
             onDragStart={(event, id) => {
-              if (arranging.current) {
+              if (!canArrange || arranging.current) {
                 event.preventDefault();
                 return;
               }
@@ -765,7 +882,7 @@ function App() {
           />
         ))}
       </section>
-      {items.length > 1 && (
+      {items.length > 1 && canArrange && (
         <p className="arrange-help" id="arrange-help">
           Drag a card’s top edge to rearrange.{" "}
           <span>Alt + arrow keys works too.</span>

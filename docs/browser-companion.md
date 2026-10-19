@@ -28,8 +28,9 @@ sensitive data: enable websites selectively. Message history is not scraped.
 
 **Stop on this site** revokes persistence permission immediately. Reload to remove the listener.
 Missing drafts: verify the app is enabled/unpaused, companion toggle is on, site access was
-granted and the host was registered. The companion captures drafts, not browser clipboard images;
-use Snipping Tool or an allowed image editor for bitmap clipboard recovery.
+granted and the host was registered. Plain-HTTP sites are supported when you enable them. The
+companion captures drafts; clipboard copies are handled separately by the local app and work
+from browsers without the companion.
 
 Communication uses local native messaging and a current-user named pipe, not a remote endpoint.
 Keep real conversations out of screenshots and issue reports.

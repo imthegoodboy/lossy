@@ -56,6 +56,10 @@ class LossySyntheticEditor {
             Pump(500);
             box.Text = "Synthetic native draft"; Pump(700);
             box.Text = "Synthetic native draft continued"; Pump(700);
+            // The fixture is topmost so UIA sees the focused editor. Freeze its
+            // value after the capture window so unrelated local typing cannot
+            // corrupt the expected fixture text in an interactive run.
+            box.ReadOnly = true; Pump(200);
             // Explicit owner: ownerless OLE copies cannot be attributed safely.
             CopyData(form.Handle, 13, System.Text.Encoding.Unicode.GetBytes("Synthetic clipboard text\0")); Pump(1800); Report("Text copy");
             using (var bitmap = new Bitmap(80, 60)) {

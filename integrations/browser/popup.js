@@ -1,4 +1,8 @@
 const status = document.querySelector("#status");
+const enableButton = document.querySelector("#enable");
+const disableButton = document.querySelector("#disable");
+let current = null;
+
 async function site() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.url || tab.incognito)
@@ -14,13 +18,35 @@ async function site() {
       .join("");
   return { tab, origin, id };
 }
-document.querySelector("#enable").onclick = async () => {
+
+async function refresh() {
   try {
-    const { tab, origin, id } = await site();
+    current = await site();
+    const [registered, permitted] = await Promise.all([
+      chrome.scripting
+        .getRegisteredContentScripts({ ids: [current.id] })
+        .catch(() => []),
+      chrome.permissions.contains({ origins: [current.origin] }),
+    ]);
+    const enabled = registered.length > 0 && permitted;
+    enableButton.disabled = enabled;
+    disableButton.disabled = !enabled;
+    status.textContent = enabled
+      ? "Drafts on this site are saved locally by Lossy."
+      : "Not enabled here. Lossy only saves sites you choose.";
+  } catch (e) {
+    current = null;
+    enableButton.disabled = true;
+    disableButton.disabled = true;
+    status.textContent = e.message;
+  }
+}
+
+enableButton.onclick = async () => {
+  try {
+    const { tab, origin, id } = current || (await site());
     if (!(await chrome.permissions.request({ origins: [origin] }))) return;
-    await chrome.scripting
-      .unregisterContentScripts({ ids: [id] })
-      .catch(() => {});
+    await chrome.scripting.unregisterContentScripts({ ids: [id] }).catch(() => {});
     await chrome.scripting.registerContentScripts([
       {
         id,
@@ -35,20 +61,23 @@ document.querySelector("#enable").onclick = async () => {
       files: ["content.js"],
     });
     status.textContent = "Enabled. Your next edits will be saved locally.";
+    await refresh();
   } catch (e) {
     status.textContent = e.message;
   }
 };
-document.querySelector("#disable").onclick = async () => {
+
+disableButton.onclick = async () => {
   try {
-    const { origin, id } = await site();
-    await chrome.scripting
-      .unregisterContentScripts({ ids: [id] })
-      .catch(() => {});
+    const { origin, id } = current || (await site());
+    await chrome.scripting.unregisterContentScripts({ ids: [id] }).catch(() => {});
     await chrome.permissions.remove({ origins: [origin] });
     status.textContent =
       "Disabled. Reload this tab to stop the existing listener.";
+    await refresh();
   } catch (e) {
     status.textContent = e.message;
   }
 };
+
+void refresh();

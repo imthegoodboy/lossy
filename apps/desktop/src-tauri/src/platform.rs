@@ -53,11 +53,7 @@ pub fn foreground() -> Option<(u32, String, String)> {
         let hwnd = GetForegroundWindow();
         let mut pid = 0;
         GetWindowThreadProcessId(hwnd, Some(&mut pid));
-        let path = process_path(pid)?;
-        let exe = std::path::Path::new(&path)
-            .file_name()?
-            .to_string_lossy()
-            .to_lowercase();
+        let exe = process_exe(pid)?;
         let mut title = vec![0u16; 1024];
         let n = GetWindowTextW(hwnd, &mut title);
         Some((
@@ -66,6 +62,19 @@ pub fn foreground() -> Option<(u32, String, String)> {
             String::from_utf16_lossy(&title[..n.max(0) as usize]),
         ))
     }
+}
+
+/// Current executable name, lower-cased. The clipboard owner can be a hidden
+/// window in a different process, so attribution uses this instead of assuming
+/// the foreground window stayed on screen after the copy.
+pub fn process_exe(pid: u32) -> Option<String> {
+    let path = process_path(pid)?;
+    Some(
+        std::path::Path::new(&path)
+            .file_name()?
+            .to_string_lossy()
+            .to_lowercase(),
+    )
 }
 
 fn process_path(pid: u32) -> Option<String> {

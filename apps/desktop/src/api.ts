@@ -22,6 +22,7 @@ export type Preferences = {
 };
 export type Status = {
   prefs: Preferences;
+  recommended_apps?: string[];
   last_saved: number;
   error?: string;
   data_dir?: string;
