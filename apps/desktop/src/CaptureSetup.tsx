@@ -1,6 +1,14 @@
-import { useState } from "react";
-import type { Preferences, Status } from "./api";
+import { useEffect, useState } from "react";
+import { openFolder, type Preferences, type Status } from "./api";
 
+const APP_PATTERN = /^[^\\/:*?"<>|]+\.exe$/i;
+
+/** Trim and lowercase an executable name for consistent app selections. */
+function cleanApp(value: string) {
+  return value.trim().toLowerCase();
+}
+
+/** Render capture health and controls for saving, app selection, and browser setup. */
 export function CaptureSetup({
   status,
   busy,
@@ -14,22 +22,63 @@ export function CaptureSetup({
 }) {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  const [apps, setApps] = useState<string | null>(null);
+  const [newApp, setNewApp] = useState("");
+  const [apps, setApps] = useState<string[]>(status.prefs.allowed_apps);
   const [connecting, setConnecting] = useState(false);
   const prefs = status.prefs;
+  const recommended = status.recommended_apps ?? [];
   const state = !prefs.enabled
     ? "Saving is off"
     : prefs.paused
       ? "Saving is paused"
-      : "Saving enabled · coverage varies by field";
+      : prefs.clipboard
+        ? "Saving on · clipboard on"
+        : "Saving on · clipboard off";
+
+  useEffect(() => {
+    setApps(prefs.allowed_apps);
+  }, [prefs.allowed_apps]);
+
+  /** Persist preference changes, exposing failures in the panel and returning success. */
   async function change(value: Partial<Preferences>) {
     setError("");
     try {
       await update(value);
+      return true;
     } catch (e) {
       setError(String(e));
+      return false;
     }
   }
+
+  /** Validate and deduplicate app names, restoring the prior selection if saving fails. */
+  async function saveApps(next: string[]) {
+    const normalized = [...new Set(next.map(cleanApp).filter(Boolean))];
+    if (normalized.length > 100) {
+      setError("Keep the selected-app list to 100 apps or fewer.");
+      return;
+    }
+    if (normalized.some((app) => !APP_PATTERN.test(app))) {
+      setError("Use executable names such as orca.exe.");
+      return;
+    }
+    const previous = apps;
+    setApps(normalized);
+    if (!(await change({ allowed_apps: normalized }))) setApps(previous);
+  }
+
+  /** Validate the entered executable and add it once to the selected apps. */
+  function addApp() {
+    const value = cleanApp(newApp);
+    if (!value) return;
+    if (!APP_PATTERN.test(value)) {
+      setError("Use an executable name such as orca.exe.");
+      return;
+    }
+    setNewApp("");
+    if (!apps.includes(value)) void saveApps([...apps, value]);
+  }
+
   return (
     <details className="capture-setup">
       <summary>
@@ -68,6 +117,7 @@ export function CaptureSetup({
         </dl>
         <fieldset disabled={busy}>
           <legend className="sr-only">Capture preferences</legend>
+          <p className="setup-heading">Saving</p>
           <label>
             <input
               type="checkbox"
@@ -92,14 +142,26 @@ export function CaptureSetup({
             />
             Start quietly at Windows sign-in
           </label>
+          <p className="setup-heading">What to keep</p>
           <label>
             <input
               type="checkbox"
               checked={prefs.clipboard}
               onChange={(e) => void change({ clipboard: e.target.checked })}
             />
-            Save copied text and bitmap images from enabled desktop apps
+            Save copied text and images from any app except password managers
           </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={prefs.browser_capture}
+              onChange={(e) =>
+                void change({ browser_capture: e.target.checked })
+              }
+            />
+            Allow drafts from sites enabled in the browser companion
+          </label>
+          <p className="setup-heading">Desktop apps</p>
           <label>
             <input
               type="checkbox"
@@ -117,68 +179,86 @@ export function CaptureSetup({
             selected-app list for tighter privacy control.
           </p>
           {!prefs.all_desktop_apps && (
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                const values = (apps ?? prefs.allowed_apps.join(", "))
-                  .split(/[,\n]/)
-                  .map((v) => v.trim().toLowerCase())
-                  .filter(Boolean);
-                if (values.some((v) => !/^[^\\/:*?"<>|]+\.exe$/i.test(v))) {
-                  setError(
-                    "Use executable names such as orca.exe, separated by commas.",
-                  );
-                  return;
-                }
-                void change({ allowed_apps: [...new Set(values)] });
-              }}
-            >
-              <label className="app-list">
-                Selected desktop apps
+            <div className="app-picker">
+              <div className="app-chips" aria-label="Selected desktop apps">
+                {apps.length === 0 && (
+                  <span className="app-empty">No desktop apps selected yet.</span>
+                )}
+                {apps.map((app) => (
+                  <span className="app-chip" key={app}>
+                    {app}
+                    <button
+                      type="button"
+                      aria-label={`Remove ${app}`}
+                      onClick={() => void saveApps(apps.filter((x) => x !== app))}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+              <form
+                className="app-add"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  addApp();
+                }}
+              >
                 <input
-                  aria-label="Selected desktop apps"
-                  value={apps ?? prefs.allowed_apps.join(", ")}
-                  onChange={(e) => setApps(e.target.value)}
-                  placeholder="notepad.exe, orca.exe, cursor.exe"
+                  aria-label="Add a desktop app"
+                  value={newApp}
+                  onChange={(e) => setNewApp(e.target.value)}
+                  placeholder="orca.exe"
                 />
-              </label>
-              <button type="submit">Save app list</button>
-            </form>
+                <button type="submit">Add app</button>
+                {recommended.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void saveApps([...apps, ...recommended])
+                    }
+                  >
+                    Add common apps
+                  </button>
+                )}
+              </form>
+            </div>
           )}
-          <label>
-            <input
-              type="checkbox"
-              checked={prefs.browser_capture}
-              onChange={(e) =>
-                void change({ browser_capture: e.target.checked })
-              }
-            />
-            Allow drafts from sites enabled in the browser companion
-          </label>
         </fieldset>
         <p>
           Chrome / Edge websites, including WhatsApp Web, need the companion
-          plus per-site permission. Desktop app permission alone does not enable
-          a website. Custom editors, terminal prompts and elevated apps may not
-          be accessible. Clipboard copies are skipped when Windows cannot verify
-          the source app.
+          plus per-site permission. Clipboard copies work separately from draft
+          capture and are skipped when a password field is focused or the source
+          is a password manager. Known browsers, terminals and WhatsApp Desktop
+          stay excluded from passive draft capture.
         </p>
-        <button
-          disabled={connecting}
-          onClick={async () => {
-            setConnecting(true);
-            setError("");
-            try {
-              setMessage(await setupBrowser());
-            } catch (e) {
-              setError(String(e));
-            } finally {
-              setConnecting(false);
-            }
-          }}
-        >
-          Set up browser companion
-        </button>
+        <div className="setup-actions">
+          <button
+            disabled={connecting}
+            onClick={async () => {
+              setConnecting(true);
+              setError("");
+              try {
+                setMessage(await setupBrowser());
+              } catch (e) {
+                setError(String(e));
+              } finally {
+                setConnecting(false);
+              }
+            }}
+          >
+            Set up browser companion
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setError("");
+              void openFolder().catch((e) => setError(String(e)));
+            }}
+          >
+            Open data folder
+          </button>
+        </div>
         {message && <p role="status">{message}</p>}
         {error && (
           <p className="error" role="alert">

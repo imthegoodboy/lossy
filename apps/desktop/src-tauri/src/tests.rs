@@ -1,4 +1,4 @@
-use crate::agent::{Preferences, Service};
+use crate::agent::{Preferences, Service, normalize_line_endings, related_draft, similar_draft};
 use serde_json::{Value, json};
 use std::sync::{Arc, RwLock};
 
@@ -23,6 +23,10 @@ fn items(s: &mut Service) -> Vec<Value> {
 fn capture(s: &mut Service, key: &str, text: &str, trusted: bool) {
     s.capture(key.into(), text.into(), "Synthetic editor".into(), trusted)
         .unwrap();
+}
+type Prior = (String, String, Option<String>);
+fn prior_view(prior: &Prior) -> (&str, &str, Option<&str>) {
+    (prior.0.as_str(), prior.1.as_str(), prior.2.as_deref())
 }
 
 #[test]
@@ -182,6 +186,9 @@ fn pause_private_secure_and_disabled_capture_are_not_saved() {
     capture(&mut s, "a", "Disabled synthetic content", true);
     assert!(items(&mut s).is_empty());
     assert!(crate::capture::sensitive("Password"));
+    assert!(crate::capture::sensitive("API key"));
+    assert!(crate::capture::sensitive("One-time verification code"));
+    assert!(!crate::capture::sensitive("Search messages"));
     assert!(!crate::capture::allowed("chrome.exe", &s.prefs));
 }
 
@@ -215,6 +222,265 @@ fn command_validation_recovery_copies_filters_and_backup() {
         .path();
     let backup = lossy_storage::Store::open(path).unwrap();
     assert_eq!(backup.list(10, 0).unwrap().len(), 2);
+}
+
+/// Verify supported control types and that related edits share a card while replacements split.
+#[test]
+fn native_document_controls_and_mid_draft_edits_are_supported() {
+    // Windows 11 Notepad exposes ControlType.Document, not the classic Edit type.
+    assert!(crate::capture::supported_control(
+        uiautomation::types::ControlType::Document
+    ));
+    assert!(crate::capture::supported_control(
+        uiautomation::types::ControlType::Edit
+    ));
+    assert!(!crate::capture::supported_control(
+        uiautomation::types::ControlType::Text
+    ));
+    assert!(related_draft(
+        "The quick brown fox jumps over the lazy dog",
+        "The quick brown cat jumps over the lazy dog"
+    ));
+    assert!(!related_draft(
+        "First synthetic draft",
+        "A completely separate note"
+    ));
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = service(dir.path());
+    capture(&mut s, "native/mid-edit", "The quick brown fox", false);
+    capture(&mut s, "native/mid-edit", "The quick red fox", false);
+    let all = items(&mut s);
+    assert_eq!(all.len(), 1);
+    assert_eq!(all[0]["text"], "The quick red fox");
+    capture(&mut s, "native/mid-edit", "Unrelated replacement", false);
+    assert_eq!(items(&mut s).len(), 2);
+}
+
+/// Verify CRLF and bare CR normalization both directly and in stored captures.
+#[test]
+fn native_line_endings_are_normalized() {
+    assert_eq!(normalize_line_endings("a\r\nb\rc\n"), "a\nb\nc\n");
+    assert_eq!(
+        normalize_line_endings("already\nnormalized"),
+        "already\nnormalized"
+    );
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = service(dir.path());
+    capture(
+        &mut s,
+        "native/line-endings",
+        "first\r\nsecond\rthird",
+        false,
+    );
+    assert_eq!(items(&mut s)[0]["text"], "first\nsecond\nthird");
+}
+
+/// Verify clipboard app exclusions, standalone card storage, and own-copy suppression.
+#[test]
+fn clipboard_policy_and_storage_are_separate_from_draft_scope() {
+    for app in [
+        "chrome.exe",
+        "msedge.exe",
+        "notepad.exe",
+        "windowsterminal.exe",
+    ] {
+        assert!(
+            crate::capture::clipboard_exclusion(app).is_none(),
+            "{app} copies should be allowed"
+        );
+    }
+    for app in [
+        "lossy.exe",
+        "bitwarden.exe",
+        "1Password.exe",
+        "KeePassXC.exe",
+    ] {
+        assert!(
+            crate::capture::clipboard_exclusion(app).is_some(),
+            "{app} copies should be excluded"
+        );
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = service(dir.path());
+    s.ignored_clipboard = 7;
+    s.clipboard(
+        "Synthetic clipboard text".into(),
+        "clipboard".into(),
+        "Clipboard · notepad".into(),
+        8,
+    )
+    .unwrap();
+    s.clipboard(
+        "Duplicate of Lossy's own copy".into(),
+        "clipboard".into(),
+        "Clipboard · lossy".into(),
+        7,
+    )
+    .unwrap();
+    let all = items(&mut s);
+    assert_eq!(all.len(), 1);
+    assert_eq!(all[0]["kind"], "clipboard");
+    assert_eq!(all[0]["text"], "Synthetic clipboard text");
+}
+
+/// Verify transient titles preserve context while unrelated documents select a new title.
+#[test]
+fn volatile_window_titles_do_not_split_native_drafts() {
+    use crate::capture::{context_title, title_pending};
+
+    assert_eq!(
+        context_title("", "notepad.exe", None, "Lossy value check"),
+        "notepad.exe"
+    );
+    let notepad_prior = (
+        "notepad.exe".to_owned(),
+        "Lossy value check abc".to_owned(),
+        None,
+    );
+    // Windows 11 Notepad uses the first line as its title and briefly reports
+    // an empty title while the edit is committed.
+    assert_eq!(
+        context_title(
+            "",
+            "notepad.exe",
+            Some(prior_view(&notepad_prior)),
+            "changed"
+        ),
+        "notepad.exe"
+    );
+    // An unrelated snapshot under a transient empty title waits for the new
+    // title instead of contaminating the previous card and then duplicating it.
+    assert!(title_pending(
+        "",
+        Some(prior_view(&notepad_prior)),
+        "A different document"
+    ));
+    assert!(!title_pending(
+        "",
+        Some(prior_view(&notepad_prior)),
+        "Lossy value check abc edited"
+    ));
+    assert!(!title_pending(
+        "A different document",
+        Some(prior_view(&notepad_prior)),
+        "A different document"
+    ));
+    assert_eq!(
+        context_title(
+            "Lossy value check abc edited",
+            "notepad.exe",
+            Some(prior_view(&notepad_prior)),
+            "Lossy value check abc edited"
+        ),
+        "notepad.exe"
+    );
+    // A genuine document switch has unrelated text and takes the new title.
+    assert_eq!(
+        context_title(
+            "A different document",
+            "notepad.exe",
+            Some(prior_view(&notepad_prior)),
+            "A different document"
+        ),
+        "A different document"
+    );
+    let same_title_prior = (
+        "Lossy value check abc".to_owned(),
+        "First synthetic sentence".to_owned(),
+        Some("Lossy value check abc".to_owned()),
+    );
+    assert_eq!(
+        context_title(
+            "Lossy value check abc",
+            "notepad.exe",
+            Some(prior_view(&same_title_prior)),
+            "A completely separate note"
+        ),
+        "Lossy value check abc"
+    );
+}
+
+/// Verify Notepad title churn updates one stored card and increments its revision.
+#[test]
+fn template_documents_with_different_titles_stay_apart() {
+    use crate::capture::context_title;
+
+    let first = "Hi Alice,\nThanks,\nBob";
+    let second = "Hi Alice,\nThanks,\nEve";
+    assert!(!similar_draft(first, second));
+    assert!(similar_draft(
+        "The quick brown fox jumps over the lazy dog",
+        "The quick brown cat jumps over the lazy dog"
+    ));
+
+    // The title changed because the first line was edited: same document.
+    let first_line_prior = (
+        "notepad.exe".to_owned(),
+        "The quick brown fox jumps over the lazy dog".to_owned(),
+        Some("The quick brown fox jumps over the lazy dog".to_owned()),
+    );
+    assert_eq!(
+        context_title(
+            "The quick brown cat jumps over the lazy dog",
+            "notepad.exe",
+            Some(prior_view(&first_line_prior)),
+            "The quick brown cat jumps over the lazy dog"
+        ),
+        "notepad.exe"
+    );
+    // A different template under a new title takes its own context.
+    let template_prior = (
+        "Email draft".to_owned(),
+        first.to_owned(),
+        Some("Email draft".to_owned()),
+    );
+    assert_eq!(
+        context_title(
+            "Second email",
+            "notepad.exe",
+            Some(prior_view(&template_prior)),
+            second
+        ),
+        "Second email"
+    );
+}
+
+#[test]
+fn notepad_title_churn_reuses_one_card_end_to_end() {
+    use crate::capture::context_title;
+
+    let initial = "Lossy value check abc\nsecond line";
+    let edited = "Lossy value check abc edited";
+    let pid = 4242;
+    let exe = "notepad.exe";
+    let runtime = "[42, 7]";
+
+    // First poll: Windows briefly reports an empty title.
+    let first_title = context_title("", exe, None, initial);
+    let first_context = format!("native|{pid}|{exe}|{first_title}|{runtime}");
+    let prior = (first_title.clone(), initial.to_owned(), None);
+    // Next poll: Notepad replaces the title with the first line while the edit
+    // continues. The context must stay on the app-name fallback.
+    let next_title = context_title(
+        "Lossy value check abc edited",
+        exe,
+        Some(prior_view(&prior)),
+        edited,
+    );
+    let next_context = format!("native|{pid}|{exe}|{next_title}|{runtime}");
+    assert_eq!(first_context, next_context);
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = service(dir.path());
+    capture(&mut s, &first_context, initial, false);
+    capture(&mut s, &next_context, edited, false);
+    let all = items(&mut s);
+    assert_eq!(all.len(), 1);
+    assert_eq!(all[0]["text"], edited);
+    assert_eq!(all[0]["revision"], 2);
 }
 
 #[test]

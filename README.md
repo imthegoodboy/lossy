@@ -4,8 +4,6 @@
 
 # Lossy
 
- 
-
 ### Keep the thought. Even when the window is gone.
 
 A local draft-recovery and clipboard app for Windows.
@@ -32,8 +30,8 @@ Or you switch between two conversations and want each unfinished message kept on
 One giant typing log would be almost as frustrating as losing the text.
 
 **Lossy keeps recoverable snapshots of supported text as you work, organised into separate cards.**
-It also remembers copied text and bitmap images from allowed apps. When you need something back,
-open the card, copy it, and continue.
+It also keeps a clipboard history of copied text and bitmap images from desktop apps. When you need
+something back, open the card, copy it, and continue.
 
 > [!IMPORTANT]
 > Lossy is a recovery aid, not a promise of zero loss. It can recover only text it observed and
@@ -43,15 +41,20 @@ open the card, copy it, and continue.
 ## A small app, with the useful things
 
 - **Unfinished text, kept locally.** Supported drafts are checkpointed while you type, without waiting for Send.
+  Notepad, Word, Office, VS Code and other standard Edit/Document fields are supported.
 - **Separate conversations.** App, window, editor and browser context help keep unrelated drafts apart.
   When identity is uncertain, Lossy favours extra cards over mixing conversations.
-- **A clipboard you can return to.** Keep copied text and PNG bitmap images from allowed desktop apps.
+- **A clipboard you can return to.** Keep copied text and PNG bitmap images from any app except
+  password managers and Lossy itself. Password and sensitive-name detection is best effort and can
+  miss a copy made just before focus changes.
+- **Find it again.** Search saved words or filter by drafts, clipboard, images, notes and pinned items.
 - **One calm page.** Four cards across on desktop, fewer in smaller windows. Click a card to read the full item.
 - **Arrange it your way.** Drag a card's top strip, choose a colour, or pin something worth keeping.
   Your arrangement and colours survive reopening.
 - **Recover without overwriting the original.** Copy a saved version or edit a recovery copy.
   Retained revision history is available under More options.
-- **Quiet startup.** After you enable capture, Lossy starts in the tray at Windows sign-in, without opening the archive.
+- **Quiet startup.** Turn on sign-in startup in Capture setup and Lossy starts in the tray at Windows
+  sign-in, without opening the archive.
 
 ## Open it. Copy it. Carry on.
 
@@ -78,7 +81,7 @@ The next release remains on hold pending investigation and Microsoft review.
 
 1. Download the `Lossy_*_x64-setup.exe` asset from the [latest release](https://github.com/imthegoodboy/lossy/releases/latest).
 2. Run the installer through **Install → Finish**, leaving **Create desktop shortcut** selected. Choosing a destination folder alone does not install the app. Open **Lossy** from your desktop or Start menu. Installation is per-user.
-3. Read and accept the inline capture permission. This enables supported capture and quiet sign-in startup.
+3. Press **Start saving** in the archive. This enables supported capture. Quiet sign-in startup is a separate checkbox in **Capture setup**.
 4. Open **Capture setup** to choose desktop apps, or explicitly opt into all supported desktop apps. Try a harmless sentence in **Notepad**, then open Lossy and check the last-save time and the saved card.
 5. For websites, follow the [Chrome/Edge companion setup](docs/browser-companion.md) and enable only the sites you choose.
 
@@ -97,24 +100,24 @@ WebView2 if it is missing; that setup step may require internet access. Lossy's 
 
 | Source | Current support |
 | --- | --- |
-| Notepad and accessible desktop Edit fields | Selected apps, or optional broader desktop capture |
+| Notepad, Word, and accessible desktop Edit/Document fields | Selected apps, or optional broader desktop capture |
 | Standard Chrome/Edge text boxes | Per-site opt-in through the unpacked browser companion |
 | WhatsApp Web drafts | Best-effort isolation; a return to a chat may make a new card when stable identity is unavailable |
-| Orca / Claude / Cursor / VS Code | Best effort: accessible Edit fields only; same-executable renderer processes supported, embedded terminals and custom editors may not work |
-| Copied desktop text and images | Allowed apps only; PNG bitmap recovery, including supported Paint / Snipping Tool copies |
-| Password fields, private browser windows, known password managers | Excluded |
-| WhatsApp Desktop, terminals, elevated or inaccessible editors | Not reliably supported |
+| Orca / Claude / Cursor / VS Code | Best effort: accessible Edit/Document fields only; same-executable renderer processes supported, embedded terminals and custom editors may not work |
+| Copied text and images | Any desktop app except password managers and Lossy itself; Windows privacy markers are respected; PNG bitmap recovery, including Paint / Snipping Tool / browser copies |
+| Password fields, private browser windows, known password managers | Excluded from passive drafts; clipboard copies are best-effort skipped when a password or sensitive named field is focused |
+| WhatsApp Desktop, terminals, elevated or inaccessible editors | Not reliably supported for drafts; copies you make explicitly can still be kept |
 
-Lossy does **not** scrape message history, capture browser clipboard images, or guarantee
-that every application exposes its drafts. See the [compatibility and recovery guide](docs/user-guide.md)
-before relying on it for important work.
+Lossy does **not** scrape message history or guarantee that every application exposes its drafts.
+See the [compatibility and recovery guide](docs/user-guide.md) before relying on it for important work.
 
 **Nothing appearing?** Expand **Capture setup**. It shows whether saving is off/paused,
 the last committed save in this session, and the most recently checked desktop field with
 an exclusion or unsupported-field reason. Seeing “enabled” alone is not proof a field was captured.
-Existing installations keep their selected-app list; add `orca.exe` or other desired executables there.
-Broader capture includes future desktop apps and can save sensitive text in ordinary fields;
-known exclusions are not a complete classification of every application.
+New installations start with common writing and work apps selected; use **Add common apps** to
+extend an existing list, or add an executable such as `orca.exe` manually. Broader capture includes future
+desktop apps and can save sensitive text in ordinary fields; known exclusions are not a complete
+classification of every application. If the background process stops, reopen Lossy to restart it.
 
 **Missing after installation?** Check that setup reached Finish, then look for
 `%LOCALAPPDATA%\Programs\Lossy\lossy.exe`. After the detection is resolved, rerun the current installer to repair files and shortcuts;
@@ -144,7 +147,10 @@ Backups remain tied to your account's DPAPI keys; they are not independently por
 A **Tauri + React** archive talks to a separate **Rust** background agent over a current-user
 named pipe. The agent owns capture and persistence, so closing the UI does not stop saving.
 Native UI Automation, clipboard observation and the browser companion feed context-aware
-snapshots into the encrypted store.
+snapshots into the encrypted store. Clipboard attribution uses the Windows clipboard owner,
+so a copy is kept even if you switch windows immediately afterwards. Copies whose owner process
+has already exited are retried briefly and then skipped rather than guessed from the foreground
+window.
 
 Native editors are sampled at about 35 ms and the clipboard at 100 ms. Browser input events
 forward immediately, with a 200 ms fallback for programmatic clearing. These are observation

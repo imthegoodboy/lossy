@@ -48,16 +48,14 @@ pub fn sid() -> Result<String, String> {
     }
 }
 
+/// Return the foreground process ID, lowercase executable name, and window title.
+/// Return None when the process executable cannot be resolved.
 pub fn foreground() -> Option<(u32, String, String)> {
     unsafe {
         let hwnd = GetForegroundWindow();
         let mut pid = 0;
         GetWindowThreadProcessId(hwnd, Some(&mut pid));
-        let path = process_path(pid)?;
-        let exe = std::path::Path::new(&path)
-            .file_name()?
-            .to_string_lossy()
-            .to_lowercase();
+        let exe = process_exe(pid)?;
         let mut title = vec![0u16; 1024];
         let n = GetWindowTextW(hwnd, &mut title);
         Some((
@@ -66,6 +64,19 @@ pub fn foreground() -> Option<(u32, String, String)> {
             String::from_utf16_lossy(&title[..n.max(0) as usize]),
         ))
     }
+}
+
+/// Current executable name, lower-cased. The clipboard owner can be a hidden
+/// window in a different process, so attribution uses this instead of assuming
+/// the foreground window stayed on screen after the copy.
+pub fn process_exe(pid: u32) -> Option<String> {
+    let path = process_path(pid)?;
+    Some(
+        std::path::Path::new(&path)
+            .file_name()?
+            .to_string_lossy()
+            .to_lowercase(),
+    )
 }
 
 fn process_path(pid: u32) -> Option<String> {
@@ -102,6 +113,67 @@ pub fn same_application_process(foreground_pid: u32, element_pid: u32) -> bool {
 pub fn clipboard_sequence() -> u32 {
     unsafe { GetClipboardSequenceNumber() }
 }
+/// Inspect Windows clipboard privacy markers without reading copied content.
+/// None means inspection failed; the caller must retry without capturing.
+pub fn clipboard_opted_out() -> Option<bool> {
+    use windows::Win32::{
+        Foundation::{ERROR_SUCCESS, GetLastError, HGLOBAL, SetLastError},
+        System::{
+            DataExchange::{
+                CloseClipboard, EnumClipboardFormats, GetClipboardData, OpenClipboard,
+                RegisterClipboardFormatW,
+            },
+            Memory::{GlobalLock, GlobalSize, GlobalUnlock},
+        },
+    };
+    use windows::core::w;
+
+    // SAFETY: the clipboard stays open throughout inspection. The history DWORD
+    // is size-checked and read only while locked; every opened clipboard is closed
+    // before returning, including when a marker cannot be read.
+    unsafe {
+        let excluded = RegisterClipboardFormatW(w!("ExcludeClipboardContentFromMonitorProcessing"));
+        let history = RegisterClipboardFormatW(w!("CanIncludeInClipboardHistory"));
+        if excluded == 0 || history == 0 {
+            return None;
+        }
+        OpenClipboard(None).ok()?;
+        let result = (|| {
+            let mut format = 0;
+            loop {
+                SetLastError(ERROR_SUCCESS);
+                format = EnumClipboardFormats(format);
+                if format == 0 {
+                    return (GetLastError() == ERROR_SUCCESS).then_some(false);
+                }
+                if format == excluded {
+                    return Some(true);
+                }
+                if format == history {
+                    let data = HGLOBAL(GetClipboardData(history).ok()?.0);
+                    if GlobalSize(data) < std::mem::size_of::<u32>() {
+                        return None;
+                    }
+                    let pointer = GlobalLock(data);
+                    if pointer.is_null() {
+                        return None;
+                    }
+                    let value = pointer.cast::<u32>().read_unaligned();
+                    // GlobalUnlock returns false on a successful final unlock too.
+                    SetLastError(ERROR_SUCCESS);
+                    if GlobalUnlock(data).is_err() && GetLastError() != ERROR_SUCCESS {
+                        return None;
+                    }
+                    if value == 0 {
+                        return Some(true);
+                    }
+                }
+            }
+        })();
+        CloseClipboard().ok()?;
+        result
+    }
+}
 pub fn clipboard_owner_pid() -> Option<u32> {
     // SAFETY: Windows owns the returned HWND; only its process identifier is queried.
     unsafe {
@@ -111,6 +183,7 @@ pub fn clipboard_owner_pid() -> Option<u32> {
         (pid != 0).then_some(pid)
     }
 }
+
 pub fn desktop_available() -> bool {
     use windows::Win32::System::StationsAndDesktops::{GetUserObjectInformationW, UOI_NAME};
     unsafe {
